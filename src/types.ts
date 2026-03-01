@@ -15,12 +15,15 @@ export interface CardData {
   chosenColor?: CardColor | null;
 }
 
+export type Difficulty = 'easy' | 'medium' | 'hard';
+
 export interface Player {
   id: string;
   name: string;
   hand: CardData[];
   isLocal: boolean;
-  hasShoutedONO: boolean;
+  hasShoutedUNO: boolean;
+  difficulty?: Difficulty;
 }
 
 export interface GameState {
@@ -36,6 +39,8 @@ export interface GameState {
   drawStack: number;
   currentWildColor: CardColor | null;
   pendingWildColorPlayerIndex: number | null;
-  pendingONOPlayerId: string | null;
+  pendingUNOPlayerId: string | null;
   jumpInPlayerId: string | null;
+  isReverseActive: boolean;
+  isDevMode: boolean;
 }
