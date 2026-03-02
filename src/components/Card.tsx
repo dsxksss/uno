@@ -63,7 +63,7 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
         whileHover={{ scale: 1.05, y: -10 }}
       >
         <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent" />
-        <span className="text-2xl font-black text-zinc-700 italic tracking-tighter">UNO</span>
+        <span className="text-2xl font-black text-zinc-700 italic tracking-tighter">ONO</span>
       </motion.div>
     );
   }
@@ -83,9 +83,9 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      whileHover={{
-        scale: 1.15,
-        y: -40,
+      whileHover={{ 
+        scale: 1.15, 
+        y: -40, 
         zIndex: 50,
         transition: { type: "spring", stiffness: 600, damping: 25 }
       }}
@@ -101,41 +101,31 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
         className
       )}
     >
-      <div className={cn(
-        "self-start font-black leading-none",
-        card.value.length > 5 ? "text-[10px]" : "text-lg"
-      )}>
-        {card.value.toUpperCase()}
-      </div>
-
+      <div className="self-start text-lg font-black leading-none">{card.value.toUpperCase()}</div>
+      
       <div className="flex-1 flex items-center justify-center">
         <div className="text-4xl font-black italic tracking-tighter drop-shadow-lg transform -rotate-12">
-          {card.value === 'draw2' ? '+2' :
-            card.value === 'draw4' ? '+4' :
-              card.value === 'skip' ? '⊘' :
-                card.value === 'reverse' ? '⇄' :
-                  card.value === 'wild' ? '★' : card.value}
+          {card.value === 'draw2' ? '+2' : 
+           card.value === 'draw4' ? '+4' : 
+           card.value === 'skip' ? '⊘' :
+           card.value === 'reverse' ? '⇄' :
+           card.value === 'wild' ? '★' : card.value}
         </div>
       </div>
 
-      <div className={cn(
-        "self-end font-black leading-none transform rotate-180",
-        card.value.length > 5 ? "text-[10px]" : "text-lg"
-      )}>
-        {card.value.toUpperCase()}
-      </div>
-
+      <div className="self-end text-lg font-black leading-none transform rotate-180">{card.value.toUpperCase()}</div>
+      
       {/* Balatro-style holographic shine effect */}
-      <motion.div
+      <motion.div 
         style={{
           background: useTransform(
             [shineX, shineY],
             ([x, y]) => `radial-gradient(circle at ${x} ${y}, rgba(255,255,255,0.4) 0%, transparent 60%)`
           )
         }}
-        className="absolute inset-0 pointer-events-none rounded-lg mix-blend-overlay"
+        className="absolute inset-0 pointer-events-none rounded-lg mix-blend-overlay" 
       />
-
+      
       {/* Static edge shine */}
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-gradient-to-br from-white/40 via-transparent to-black/20 rounded-lg" />
     </motion.div>

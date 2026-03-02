@@ -7,21 +7,20 @@ export const WILD_VALUES: CardValue[] = ['wild', 'draw4'];
 export const createDeck = (): CardData[] => {
   const deck: CardData[] = [];
   let idCounter = 0;
-  const seed = Date.now();
 
   COLORS.forEach(color => {
     VALUES.forEach(value => {
       // Two of each value except 0
       const count = value === '0' ? 1 : 2;
       for (let i = 0; i < count; i++) {
-        deck.push({ id: `card-${seed}-${idCounter++}`, color, value });
+        deck.push({ id: `card-${idCounter++}`, color, value });
       }
     });
   });
 
   for (let i = 0; i < 4; i++) {
-    deck.push({ id: `card-${seed}-${idCounter++}`, color: 'wild', value: 'wild' });
-    deck.push({ id: `card-${seed}-${idCounter++}`, color: 'wild', value: 'draw4' });
+    deck.push({ id: `card-${idCounter++}`, color: 'wild', value: 'wild' });
+    deck.push({ id: `card-${idCounter++}`, color: 'wild', value: 'draw4' });
   }
 
   return shuffle(deck);
@@ -38,25 +37,20 @@ export const shuffle = <T,>(array: T[]): T[] => {
 
 export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawStack: number = 0, currentWildColor: CardColor | null = null): boolean => {
   if (!topCard) return false;
-
-  const effectiveColor = (topCard.color === 'wild' && currentWildColor) ? currentWildColor : topCard.color;
-
   if (drawStack > 0) {
-    // Basic stacking: +2 or +4 always works
-    if (card.value === 'draw2' || card.value === 'draw4') return true;
-
-    // Royale rules: Reverse or Skip of the same color can deflect the penalty
-    if (card.color === effectiveColor && (card.value === 'reverse' || card.value === 'skip')) return true;
-
-    return false;
+    // If there's a stack, you can only play another draw card to stack it
+    return card.value === 'draw2' || card.value === 'draw4';
   }
-
   if (card.color === 'wild') return true;
+  
+  const effectiveColor = (topCard.color === 'wild' && currentWildColor) ? currentWildColor : topCard.color;
   return card.color === effectiveColor || card.value === topCard.value;
 };
 
-export const canJumpIn = (card: CardData, topCard: CardData | undefined, _drawStack: number = 0): boolean => {
+export const canJumpIn = (card: CardData, topCard: CardData | undefined, drawStack: number = 0): boolean => {
   if (!topCard) return false;
+  // Jump-in is not allowed if there's an active draw stack
+  if (drawStack > 0) return false;
   // Jump-in requires an exact match of color and value
   if (card.color === 'wild' || topCard.color === 'wild') return false;
   return card.color === topCard.color && card.value === topCard.value;
