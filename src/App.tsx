@@ -106,6 +106,7 @@ export default function App() {
   const [devClicks, setDevClicks] = useState(0);
   const [seeAllHands, setSeeAllHands] = useState(false);
   const [hoveredGodModePlayerId, setHoveredGodModePlayerId] = useState<string | null>(null);
+  const lastNumberValue = [...gameState.discardPile].reverse().find(isNumberCard)?.value || null;
 
   const playSound = useCallback((soundName: string) => {
     if (!isMuted && sounds[soundName as keyof typeof sounds]) {
@@ -300,11 +301,11 @@ export default function App() {
 
       const isJumpIn = playerIndex !== prev.currentPlayerIndex;
 
-      // Explicitly validate play based on whose turn it is
       if (isJumpIn) {
         if (!canJumpIn(card, topCard, drawStack)) return prev;
       } else {
-        if (!canPlayCard(card, topCard, drawStack, currentWildColor)) return prev;
+        const lastNum = [...prev.discardPile].reverse().find(isNumberCard)?.value || null;
+        if (!canPlayCard(card, topCard, drawStack, currentWildColor, lastNum)) return prev;
       }
 
       const newHand = [...player.hand];
@@ -620,7 +621,7 @@ export default function App() {
       const topCard = gameState.discardPile[gameState.discardPile.length - 1];
       const drawStack = gameState.drawStack;
       const currentWildColor = gameState.currentWildColor;
-      const playableCard = currentPlayer.hand.find(c => canPlayCard(c, topCard, drawStack, currentWildColor));
+      const playableCard = currentPlayer.hand.find(c => canPlayCard(c, topCard, drawStack, currentWildColor, lastNumberValue));
 
       if (playableCard) {
         playCard(currentPlayerIndex, playableCard.id);
@@ -689,7 +690,7 @@ export default function App() {
           const currentWildColor = gameState.currentWildColor;
 
           let playableCard: CardData | undefined;
-          const playableCards = currentPlayer.hand.filter(c => canPlayCard(c, topCard, drawStack, currentWildColor));
+          const playableCards = currentPlayer.hand.filter(c => canPlayCard(c, topCard, drawStack, currentWildColor, lastNumberValue));
 
           if (difficulty === 'hard' && playableCards.length > 0) {
             // Hard AI Strategy
@@ -747,7 +748,7 @@ export default function App() {
     }
 
     // Normal play selection
-    if (isLocalTurn && !isPendingColor && canPlayCard(card, topCard, drawStack, currentWildColor)) {
+    if (isLocalTurn && !isPendingColor && canPlayCard(card, topCard, drawStack, currentWildColor, lastNumberValue)) {
       if (selectedCardId === card.id) {
         setSelectedCardId(null);
       } else {
@@ -1678,7 +1679,7 @@ export default function App() {
                       <Play size={14} fill="currentColor" /> 出牌
                     </motion.button>
                   ) : (
-                    !localPlayer.hand.some(c => canPlayCard(c, topCard, gameState.drawStack, gameState.currentWildColor)) && (
+                    !localPlayer.hand.some(c => canPlayCard(c, topCard, gameState.drawStack, gameState.currentWildColor, lastNumberValue)) && (
                       <motion.button
                         key="draw-btn"
                         initial={{ scale: 0.8, opacity: 0 }}
@@ -1755,6 +1756,7 @@ export default function App() {
                   const fanY = Math.pow(Math.abs(offset), 1.5) * (yFactor / Math.max(total * 0.1, 1));
                   const yOffset = isHorizontal ? (isHandHovered ? -20 : 0) : fanY;
 
+                  const lastNumberValue = [...gameState.discardPile].reverse().find(isNumberCard)?.value || null;
                   return (
                     <motion.div
                       key={card.id}
@@ -1777,8 +1779,8 @@ export default function App() {
                     >
                       <Card
                         card={card}
-                        disabled={isAnimating || ((!isLocalTurn || isPendingColor || !canPlayCard(card, topCard, gameState.drawStack, gameState.currentWildColor)) && !canJumpIn(card, topCard, gameState.drawStack))}
-                        isHighlighted={!isAnimating && showRecommendations && isLocalTurn && !isPendingColor && canPlayCard(card, topCard, gameState.drawStack, gameState.currentWildColor)}
+                        disabled={isAnimating || ((!isLocalTurn || isPendingColor || !canPlayCard(card, topCard, gameState.drawStack, gameState.currentWildColor, lastNumberValue)) && !canJumpIn(card, topCard, gameState.drawStack))}
+                        isHighlighted={!isAnimating && showRecommendations && isLocalTurn && !isPendingColor && canPlayCard(card, topCard, gameState.drawStack, gameState.currentWildColor, lastNumberValue)}
                         isSelected={selectedCardId === card.id}
                         onMouseEnter={() => playSound('hover')}
                         onClick={() => handleCardClick(card)}

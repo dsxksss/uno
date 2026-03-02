@@ -36,7 +36,7 @@ export const shuffle = <T,>(array: T[]): T[] => {
   return newArray;
 };
 
-export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawStack: number = 0, currentWildColor: CardColor | null = null): boolean => {
+export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawStack: number = 0, currentWildColor: CardColor | null = null, lastNumberValue: CardValue | null = null): boolean => {
   if (!topCard) return false;
 
   const effectiveColor = (topCard.color === 'wild' && currentWildColor) ? currentWildColor : topCard.color;
@@ -52,7 +52,14 @@ export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawS
   }
 
   if (card.color === 'wild') return true;
-  return card.color === effectiveColor || card.value === topCard.value;
+  
+  // Standard matching: match color or match top card's value
+  const matchesCurrent = card.color === effectiveColor || card.value === topCard.value;
+  
+  // Royale matching: match the value of the most recent numeric card played
+  const matchesLastNumber = lastNumberValue && card.value === lastNumberValue;
+
+  return matchesCurrent || !!matchesLastNumber;
 };
 
 export const canJumpIn = (card: CardData, topCard: CardData | undefined, _drawStack: number = 0): boolean => {
