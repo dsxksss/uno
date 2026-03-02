@@ -43,4 +43,5 @@ export interface GameState {
   jumpInPlayerId: string | null;
   isReverseActive: boolean;
   isDevMode: boolean;
+  playerLeftMessage?: string;
 }

@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,6 +59,8 @@ func NewRoom(code string) *Room {
 			CurrentPlayerIndex: 0,
 			TimeLeft: 30,
 			Players: []Player{},
+			Deck: []CardData{},
+			DiscardPile: []CardData{},
 		},
 	}
 }
@@ -106,14 +111,21 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	go client.writePump()
 	go client.readPump()
+	
+	// Send client ID
+	initInfo, _ := json.Marshal(map[string]string{"id": client.ID})
+	initMsg, _ := json.Marshal(Message{Type: "INIT", Payload: initInfo})
+	client.Send <- initMsg
 }
 
 func (c *Client) readPump() {
 	defer func() {
 		if c.Room != nil {
 			c.Room.Mutex.Lock()
+			c.Room.RemovePlayer(c.ID)
 			delete(c.Room.Clients, c.ID)
 			c.Room.Mutex.Unlock()
+			c.Room.UpdateState()
 		}
 		c.Conn.Close()
 	}()
@@ -197,17 +209,48 @@ func (c *Client) handleMessage(msg Message) {
 		}
 		json.Unmarshal(msg.Payload, &payload)
 		
+		roomCode := strings.ToUpper(strings.TrimSpace(payload.RoomCode))
 		roomsMutex.Lock()
-		room, exists := rooms[payload.RoomCode]
+		room, exists := rooms[roomCode]
 		roomsMutex.Unlock()
 		
 		if !exists {
-			// Error: Room not found
+			errorPayload, _ := json.Marshal(map[string]string{
+				"message": "找不到该房间，请检查代码是否正确",
+			})
+			errorMsg, _ := json.Marshal(Message{
+				Type:    "ERROR",
+				Payload: errorPayload,
+			})
+			c.Send <- errorMsg
+			return
+		}
+		
+		room.Mutex.Lock()
+		
+		// Check for duplicate names
+		nameExists := false
+		for _, p := range room.State.Players {
+			if p.Name == payload.PlayerName {
+				nameExists = true
+				break
+			}
+		}
+		
+		if nameExists {
+			room.Mutex.Unlock()
+			errorPayload, _ := json.Marshal(map[string]string{
+				"message": "房间中已存在同名玩家，请换个名字",
+			})
+			errorMsg, _ := json.Marshal(Message{
+				Type:    "ERROR",
+				Payload: errorPayload,
+			})
+			c.Send <- errorMsg
 			return
 		}
 		
 		c.Room = room
-		room.Mutex.Lock()
 		room.Clients[c.ID] = c
 		room.State.Players = append(room.State.Players, Player{
 			ID:      c.ID,
@@ -222,9 +265,61 @@ func (c *Client) handleMessage(msg Message) {
 	case "START_GAME":
 		if c.Room == nil { return }
 		c.Room.Mutex.Lock()
-		c.Room.StartGame()
+		// Only host (first player) can start
+		if len(c.Room.State.Players) > 0 && c.Room.State.Players[0].ID == c.ID {
+			c.Room.StartGame()
+		}
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
+		
+	case "UPDATE_AI_SETTINGS":
+		var payload struct {
+			AiCount    int        `json:"aiCount"`
+			Difficulty Difficulty `json:"difficulty"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.UpdateAISettings(c.ID, payload.AiCount, payload.Difficulty)
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
+
+	case "LEAVE_ROOM":
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.RemovePlayer(c.ID)
+		delete(c.Room.Clients, c.ID)
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
+		c.Room = nil
+
+	case "GET_ROOM_LIST":
+		roomsMutex.Lock()
+		activeRooms := []map[string]interface{}{}
+		for _, r := range rooms {
+			if r.State.Status == Lobby && len(r.State.Players) > 0 {
+				hostName := "未知"
+				if len(r.State.Players) > 0 {
+					hostName = r.State.Players[0].Name
+				}
+				activeRooms = append(activeRooms, map[string]interface{}{
+					"code":        r.Code,
+					"playerCount": len(r.State.Players),
+					"hostName":    hostName,
+				})
+			}
+		}
+		roomsMutex.Unlock()
+
+		payload, _ := json.Marshal(map[string]interface{}{
+			"rooms": activeRooms,
+		})
+		infoMsg, _ := json.Marshal(Message{
+			Type:    "ROOM_LIST",
+			Payload: payload,
+		})
+		c.Send <- infoMsg
 		
 	case "PLAY_CARD":
 		var payload struct {
@@ -256,16 +351,31 @@ func (c *Client) handleMessage(msg Message) {
 		c.Room.ChooseColor(c.ID, payload.Color)
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
+		
+	case "SHOUT_UNO":
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.ShoutUno(c.ID)
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
 	}
 }
 
 func main() {
+	host := flag.String("host", "0.0.0.0", "host to bind to")
+	port := flag.Int("port", 8080, "port to bind to")
+	flag.Parse()
+
 	rand.Seed(time.Now().UnixNano())
 	
 	http.HandleFunc("/ws", handleWebSocket)
 	
-	log.Println("Server starting on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	fs := http.FileServer(http.Dir("../dist"))
+	http.Handle("/", fs)
+	
+	addr := fmt.Sprintf("%s:%d", *host, *port)
+	log.Printf("Server starting on %s\n", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
 }

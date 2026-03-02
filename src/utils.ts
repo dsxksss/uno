@@ -52,10 +52,10 @@ export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawS
   }
 
   if (card.color === 'wild') return true;
-  
+
   // Standard matching: match color or match top card's value
   const matchesCurrent = card.color === effectiveColor || card.value === topCard.value;
-  
+
   // Royale matching: match the value of the most recent numeric card played
   const matchesLastNumber = lastNumberValue && card.value === lastNumberValue;
 
@@ -64,8 +64,8 @@ export const canPlayCard = (card: CardData, topCard: CardData | undefined, drawS
 
 export const canJumpIn = (card: CardData, topCard: CardData | undefined, _drawStack: number = 0): boolean => {
   if (!topCard) return false;
-  // Jump-in requires an exact match of color and value
-  if (card.color === 'wild' || topCard.color === 'wild') return false;
+  // Jump-in requires an exact match of color and value, and only for number cards
+  if (!isNumberCard(card)) return false;
   return card.color === topCard.color && card.value === topCard.value;
 };
 

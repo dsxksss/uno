@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Card } from './components/Card';
 import { CardData, GameState, Player, cn, CardColor, Difficulty } from './types';
 import { createDeck, canPlayCard, canJumpIn, shuffle, isNumberCard } from './utils';
-import { Users, Plus, Play, LogIn, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft } from 'lucide-react';
+import { Users, Plus, Play, LogIn, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft, Copy, Check, Globe } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Howl } from 'howler';
 
@@ -100,13 +100,55 @@ export default function App() {
   const [isDiscardHovered, setIsDiscardHovered] = useState(false);
   const [sortType, setSortType] = useState<'value' | 'color'>('value');
   const [isMuted, setIsMuted] = useState(false);
-  const [aiCount, setAiCount] = useState(3);
+  const [aiCount, setAiCount] = useState(0);
   const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('medium');
   const [drawingCards, setDrawingCards] = useState<{ id: string, playerIndex: number, card: CardData }[]>([]);
   const [devClicks, setDevClicks] = useState(0);
   const [seeAllHands, setSeeAllHands] = useState(false);
   const [hoveredGodModePlayerId, setHoveredGodModePlayerId] = useState<string | null>(null);
-  const lastNumberValue = [...gameState.discardPile].reverse().find(isNumberCard)?.value || null;
+  const [activeRooms, setActiveRooms] = useState<{ code: string, playerCount: number }[]>([]);
+  const [showRoomHall, setShowRoomHall] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
+  const clientIdRef = useRef<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
+
+  useEffect(() => {
+    const socket = new WebSocket(`ws://${window.location.host}/ws`);
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'INIT') {
+        const id = msg.payload.id;
+        clientIdRef.current = id;
+        setClientId(id);
+      } else if (msg.type === 'UPDATE_STATE') {
+        const newState = msg.payload.state;
+
+        // Mark which player is local based on clientIdRef
+        if (clientIdRef.current) {
+          newState.players = newState.players.map((p: any) => ({
+            ...p,
+            isLocal: p.id === clientIdRef.current
+          }));
+        }
+
+        setGameState(newState);
+      } else if (msg.type === 'ROOM_LIST') {
+        setActiveRooms(msg.payload.rooms);
+      } else if (msg.type === 'ERROR') {
+        alert(msg.payload.message);
+      }
+    };
+
+    socket.onopen = () => {
+      console.log('Connected to UNO server');
+    };
+
+    return () => socket.close();
+  }, []);
 
   const playSound = useCallback((soundName: string) => {
     if (!isMuted && sounds[soundName as keyof typeof sounds]) {
@@ -123,35 +165,10 @@ export default function App() {
   }, []);
 
   const createRoom = () => {
-    if (!playerName) return;
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const localPlayer: Player = {
-      id: 'local-player',
-      name: playerName,
-      hand: [],
-      isLocal: true,
-      hasShoutedUNO: false,
-    };
-
-    // Add some AI players for simulation
-    const aiPlayers: Player[] = Array.from({ length: aiCount }).map((_, i) => ({
-      id: `ai-${i}`,
-      name: `机器人 ${i + 1}`,
-      hand: [],
-      isLocal: false,
-      hasShoutedUNO: false,
-      difficulty: aiDifficulty,
-    }));
-
-    setGameState(prev => ({
-      ...prev,
-      roomCode: code,
-      players: [localPlayer, ...aiPlayers],
-      status: 'lobby',
-      winner: null,
-      pendingUNOPlayerId: null,
-      jumpInPlayerId: null,
-      isDevMode: false,
+    if (!playerName || !socketRef.current) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'CREATE_ROOM',
+      payload: { playerName }
     }));
     playSound('click');
   };
@@ -190,21 +207,18 @@ export default function App() {
   };
 
   const joinRoom = () => {
-    if (!playerName || !inputRoomCode) return;
-    setGameState(prev => ({
-      ...prev,
-      roomCode: inputRoomCode,
-      players: [
-        { id: 'local-player', name: playerName, hand: [], isLocal: true, hasShoutedUNO: false },
-        { id: 'ai-1', name: '机器人 1', hand: [], isLocal: false, hasShoutedUNO: false, difficulty: 'medium' },
-        { id: 'ai-2', name: '机器人 2', hand: [], isLocal: false, hasShoutedUNO: false, difficulty: 'medium' },
-      ],
-      status: 'lobby',
+    if (!playerName || !inputRoomCode || !socketRef.current) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'JOIN_ROOM',
+      payload: { playerName, roomCode: inputRoomCode }
     }));
     playSound('click');
   };
 
   const leaveLobby = () => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'LEAVE_ROOM' }));
+    }
     setGameState(prev => ({
       ...prev,
       status: 'lobby',
@@ -220,21 +234,18 @@ export default function App() {
     }));
     setSeeAllHands(false);
     setDevClicks(0);
+    setAiCount(0);
     playSound('click');
   };
 
   const leaveGame = () => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'LEAVE_ROOM' }));
+    }
     playSound('click');
     setGameState(prev => {
-      const localPlayer = prev.players.find(p => p.isLocal);
-      const handToReturn = localPlayer ? localPlayer.hand : [];
-
-      // Shuffle leaving player's hand back into deck if game was active
-      const newDeck = shuffle([...prev.deck, ...handToReturn]);
-
       return {
         ...prev,
-        deck: newDeck,
         status: 'lobby',
         roomCode: '',
         players: [],
@@ -249,387 +260,60 @@ export default function App() {
     });
     setSeeAllHands(false);
     setDevClicks(0);
+    setAiCount(0);
   };
 
   const startGame = () => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({ type: 'START_GAME' }));
     playSound('click');
-    const fullDeck = createDeck();    // Give cards to players
-    const players = gameState.players.map(p => ({ ...p, hand: [], hasShoutedUNO: false }));
-
-    // Deal cards
-    for (let i = 0; i < INITIAL_HAND_SIZE; i++) {
-      players.forEach(p => {
-        const card = fullDeck.pop();
-        if (card) p.hand.push(card);
-      });
-    }
-
-    const firstCardIndex = fullDeck.findIndex(card => !['skip', 'reverse', 'draw2', 'wild', 'draw4'].includes(card.value));
-    const firstCard = fullDeck.splice(firstCardIndex, 1)[0];
-
-    setGameState(prev => ({
-      ...prev,
-      deck: fullDeck,
-      discardPile: [firstCard],
-      players,
-      status: 'playing',
-      currentPlayerIndex: 0,
-      direction: 1,
-      winner: null,
-      timeLeft: 30,
-      drawStack: 0,
-      currentWildColor: null,
-      pendingWildColorPlayerIndex: null,
-      pendingUNOPlayerId: null,
-      jumpInPlayerId: null,
-    }));
-
-    triggerShake();
-    setShowRecommendations(false);
-    setSelectedCardId(null);
   };
 
   const playCard = (playerIndex: number, cardId: string) => {
-    setGameState(prev => {
-      const player = prev.players[playerIndex];
-      const cardIndex = player.hand.findIndex(c => c.id === cardId);
-      if (cardIndex === -1) return prev;
-      const card = player.hand[cardIndex];
-      const topCard = prev.discardPile[prev.discardPile.length - 1];
-      const drawStack = prev.drawStack;
-      const currentWildColor = prev.currentWildColor;
-
-      const isJumpIn = playerIndex !== prev.currentPlayerIndex;
-
-      if (isJumpIn) {
-        if (!canJumpIn(card, topCard, drawStack)) return prev;
-      } else {
-        const lastNum = [...prev.discardPile].reverse().find(isNumberCard)?.value || null;
-        if (!canPlayCard(card, topCard, drawStack, currentWildColor, lastNum)) return prev;
-      }
-
-      const newHand = [...player.hand];
-      newHand.splice(cardIndex, 1);
-
-      const newPlayers = [...prev.players];
-      // 扣除打出的牌
-      newPlayers[playerIndex] = { ...player, hand: newHand, hasShoutedUNO: false };
-
-      let nextDirection = prev.direction;
-      let skipNext = false;
-      let newDrawStack = drawStack;
-
-      if (card.value === 'reverse') {
-        nextDirection = (prev.direction * -1) as (1 | -1);
-        if (prev.players.length === 2) skipNext = true;
-      } else if (card.value === 'skip') {
-        skipNext = true;
-      } else if (card.value === 'draw2') {
-        newDrawStack += 2;
-      } else if (card.value === 'draw4') {
-        newDrawStack += 4;
-      }
-
-      // Handle winner
-      if (newHand.length === 0) {
-        // Run side effects outside or after this? Confetti and sounds.
-        // For now, keep the state update pure.
-        setTimeout(() => {
-          if (player.isLocal) {
-            playSound('win');
-            confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-          } else {
-            playSound('lose');
-          }
-        }, 0);
-
-        setTimeout(() => {
-          setGameState(p => ({ ...p, status: 'ended' }));
-        }, 1500);
-
-        return {
-          ...prev,
-          players: newPlayers,
-          discardPile: [...prev.discardPile, card],
-          winner: player.name,
-        };
-      }
-
-      let nextPlayerIndex = (playerIndex + nextDirection + prev.players.length) % prev.players.length;
-      if (skipNext) {
-        nextPlayerIndex = (nextPlayerIndex + nextDirection + prev.players.length) % prev.players.length;
-      }
-
-      // Post-state side effects
-      setTimeout(() => {
-        triggerShake();
-        setShowRecommendations(false);
-        setSelectedCardId(null);
-        const randomPlaySound = Math.random() > 0.5 ? 'play1' : 'play2';
-        const isActionCard = ['draw2', 'draw4', 'skip', 'reverse'].includes(card.value);
-        playSound(isActionCard ? 'item' : randomPlaySound as any);
-        if (card.value === 'skip') playSound('skip');
-        if (card.value === 'reverse') {
-          playSound('item'); // Reuse item sound or specific if added
-          setTimeout(() => setGameState(p => ({ ...p, isReverseActive: false })), 2000);
-        }
-        if (isJumpIn) {
-          setTimeout(() => setGameState(p => ({ ...p, jumpInPlayerId: null })), 2000);
-        }
-      }, 0);
-
-      // Auto-shout check
-      const shoutTarget = newPlayers.find(p => p.hand.length === 1 && !p.hasShoutedUNO);
-      return {
-        ...prev,
-        players: newPlayers,
-        discardPile: [...prev.discardPile, card],
-        currentPlayerIndex: nextPlayerIndex,
-        direction: nextDirection,
-        timeLeft: 30,
-        drawStack: newDrawStack,
-        currentWildColor: card.color === 'wild' || card.value === 'draw4' ? null : card.color,
-        pendingWildColorPlayerIndex: card.color === 'wild' || card.value === 'draw4' ? playerIndex : null,
-        pendingUNOPlayerId: shoutTarget ? shoutTarget.id : null,
-        jumpInPlayerId: isJumpIn ? player.id : null,
-        isReverseActive: card.value === 'reverse',
-      };
-    });
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'PLAY_CARD',
+      payload: { cardId }
+    }));
   };
 
   const drawCard = (playerIndex: number) => {
-    setGameState(prev => {
-      const newDeck = [...prev.deck];
-      const newDiscardPile = [...prev.discardPile];
-      const newPlayers = [...prev.players];
-      const player = newPlayers[playerIndex];
-
-      const drawCount = prev.drawStack > 0 ? prev.drawStack : 1;
-      const drawnCards: CardData[] = [];
-
-      for (let i = 0; i < drawCount; i++) {
-        if (newDeck.length === 0) {
-          if (newDiscardPile.length <= 1) break;
-          const topCard = newDiscardPile[newDiscardPile.length - 1];
-          const reshuffledDeck = shuffle(newDiscardPile.slice(0, -1).map(c => ({ ...c, chosenColor: undefined })));
-          newDeck.push(...reshuffledDeck);
-          newDiscardPile.length = 0;
-          newDiscardPile.push(topCard);
-          setTimeout(() => playSound('draw'), 0);
-        }
-        const card = newDeck.pop();
-        if (card) drawnCards.push(card);
-      }
-
-      if (drawnCards.length === 0) return prev;
-
-      newPlayers[playerIndex] = {
-        ...player,
-        hand: [...player.hand, ...drawnCards],
-        hasShoutedUNO: false,
-      };
-
-      setTimeout(() => {
-        drawnCards.forEach((card, i) => {
-          setTimeout(() => {
-            const dcId = `${card.id}-${Date.now()}-${i}-${Math.random()}`;
-            setDrawingCards(p => [...p, { id: dcId, playerIndex, card }]);
-            playSound('draw');
-            setTimeout(() => {
-              setDrawingCards(p => p.filter(dc => dc.id !== dcId));
-            }, 600);
-          }, i * 150);
-        });
-        triggerShake();
-        setShowRecommendations(false);
-        setSelectedCardId(null);
-      }, 0);
-
-      return {
-        ...prev,
-        deck: newDeck,
-        discardPile: newDiscardPile,
-        players: newPlayers,
-        currentPlayerIndex: (prev.currentPlayerIndex + prev.direction + prev.players.length) % prev.players.length,
-        timeLeft: 30,
-        drawStack: 0,
-        currentWildColor: prev.currentWildColor,
-        pendingUNOPlayerId: null,
-      };
-    });
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({ type: 'DRAW_CARD' }));
   };
 
   const chooseColor = (color: CardColor) => {
-    setGameState(prev => {
-      const playerIndex = prev.pendingWildColorPlayerIndex!;
-      const newDiscardPile = [...prev.discardPile];
-      const topCardIndex = newDiscardPile.length - 1;
-
-      // Persist the chosen color on the card itself
-      newDiscardPile[topCardIndex] = {
-        ...newDiscardPile[topCardIndex],
-        chosenColor: color
-      };
-
-      const card = newDiscardPile[topCardIndex];
-      let nextDirection = prev.direction;
-      let skipNext = false;
-      let newDrawStack = prev.drawStack;
-
-      if (card.value === 'draw4') {
-        newDrawStack += 4;
-      }
-
-      let nextPlayerIndex = (playerIndex + nextDirection + prev.players.length) % prev.players.length;
-
-      return {
-        ...prev,
-        discardPile: newDiscardPile,
-        currentPlayerIndex: nextPlayerIndex,
-        direction: nextDirection,
-        timeLeft: 30,
-        drawStack: newDrawStack,
-        currentWildColor: color,
-        pendingWildColorPlayerIndex: null,
-      };
-    });
-
-    triggerShake();
-    playSound('color');
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'CHOOSE_COLOR',
+      payload: { color }
+    }));
   };
 
   const shoutUNO = (playerId: string) => {
-    setGameState(prev => {
-      const playerIndex = prev.players.findIndex(p => p.id === playerId);
-      if (playerIndex === -1) return prev;
-
-      const newPlayers = [...prev.players];
-      newPlayers[playerIndex] = { ...newPlayers[playerIndex], hasShoutedUNO: true };
-
-      return {
-        ...prev,
-        players: newPlayers,
-        pendingUNOPlayerId: null,
-      };
-    });
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({ type: 'SHOUT_UNO' }));
     playSound('uno');
-
-    // Auto-clear the bubble after 2 seconds
-    setTimeout(() => {
-      setGameState(prev => {
-        const playerIndex = prev.players.findIndex(p => p.id === playerId);
-        if (playerIndex === -1) return prev;
-        const newPlayers = [...prev.players];
-        newPlayers[playerIndex] = { ...newPlayers[playerIndex], hasShoutedUNO: false };
-        return { ...prev, players: newPlayers };
-      });
-    }, 2000);
   };
 
-  // Turn Timer Countdown
+  // Sound effects based on state changes
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (gameState.status === 'playing') {
-      timer = setInterval(() => {
-        setGameState(prev => {
-          if (prev.timeLeft <= 0) {
-            clearInterval(timer);
-            return prev;
-          }
-          // Pause timer during overlay animations
-          if (prev.isReverseActive || prev.jumpInPlayerId) {
-            return prev;
-          }
-          if (prev.timeLeft === 4) { // Sound starts at 3,2,1 usually
-            playSound('countdown');
-          }
-          return { ...prev, timeLeft: prev.timeLeft - 1 };
-        });
-      }, 1000);
+    if (gameState.status !== 'playing') return;
+    const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal;
+    if (isLocalTurn) {
+      playSound('turn');
     }
-    return () => clearInterval(timer);
-  }, [gameState.status, gameState.currentPlayerIndex]);
+  }, [gameState.currentPlayerIndex]);
 
-  // Handle UNO Penalty
   useEffect(() => {
-    if (gameState.status === 'playing' && gameState.pendingUNOPlayerId) {
-      const timer = setTimeout(() => {
-        setGameState(prev => {
-          if (!prev.pendingUNOPlayerId) return prev;
-
-          const playerIndex = prev.players.findIndex(p => p.id === prev.pendingUNOPlayerId);
-          if (playerIndex === -1) return prev;
-
-          const player = prev.players[playerIndex];
-          if (player.hasShoutedUNO) return prev;
-
-          // Penalty: Draw 2 cards
-          const newDeck = [...prev.deck];
-          const newDiscardPile = [...prev.discardPile];
-          const drawnCards: CardData[] = [];
-
-          for (let i = 0; i < 2; i++) {
-            if (newDeck.length === 0) {
-              if (newDiscardPile.length <= 1) break;
-              const topCard = newDiscardPile[newDiscardPile.length - 1];
-              const reshuffledDeck = shuffle(newDiscardPile.slice(0, -1).map(c => ({ ...c, chosenColor: undefined })));
-              newDeck.push(...reshuffledDeck);
-              newDiscardPile.length = 0;
-              newDiscardPile.push(topCard);
-            }
-            const card = newDeck.pop();
-            if (card) drawnCards.push(card);
-          }
-
-          const newPlayers = [...prev.players];
-          newPlayers[playerIndex] = {
-            ...player,
-            hand: [...player.hand, ...drawnCards],
-            hasShoutedUNO: false,
-          };
-
-          return {
-            ...prev,
-            deck: newDeck,
-            discardPile: newDiscardPile,
-            players: newPlayers,
-            pendingUNOPlayerId: null,
-          };
-        });
-        triggerShake();
-        playSound('draw');
-      }, 3000); // 3 seconds to shout UNO
-      return () => clearTimeout(timer);
+    if (gameState.discardPile.length > 1) {
+      const card = gameState.discardPile[gameState.discardPile.length - 1];
+      const isActionCard = ['draw2', 'draw4', 'skip', 'reverse'].includes(card.value);
+      playSound(isActionCard ? 'item' : (Math.random() > 0.5 ? 'play1' : 'play2'));
+      if (card.value === 'skip') playSound('skip');
+      triggerShake();
     }
-  }, [gameState.pendingUNOPlayerId, gameState.status]);
-
-  // Handle Timeout
-  useEffect(() => {
-    if (gameState.status === 'playing' && gameState.timeLeft <= 0) {
-      // Don't act if an overlay animation is playing
-      if (gameState.isReverseActive || gameState.jumpInPlayerId) return;
-
-      if (gameState.pendingWildColorPlayerIndex !== null) {
-        const colors: CardColor[] = ['red', 'blue', 'green', 'yellow'];
-        const randomColor = colors[Math.floor(Math.random() * colors.length)];
-        chooseColor(randomColor);
-        return;
-      }
-
-      const currentPlayerIndex = gameState.currentPlayerIndex;
-      const currentPlayer = gameState.players[currentPlayerIndex];
-      const topCard = gameState.discardPile[gameState.discardPile.length - 1];
-      const drawStack = gameState.drawStack;
-      const currentWildColor = gameState.currentWildColor;
-      const playableCard = currentPlayer.hand.find(c => canPlayCard(c, topCard, drawStack, currentWildColor, lastNumberValue));
-
-      if (playableCard) {
-        playCard(currentPlayerIndex, playableCard.id);
-      } else {
-        drawCard(currentPlayerIndex);
-      }
-    }
-  }, [gameState.timeLeft, gameState.status, gameState.isReverseActive, gameState.jumpInPlayerId]);
+  }, [gameState.discardPile.length]);
 
   // Enhanced AI logic
   useEffect(() => {
@@ -725,6 +409,8 @@ export default function App() {
       const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal;
       if (isLocalTurn) {
         playSound('turn');
+      } else {
+        setSelectedCardId(null);
       }
     }
   }, [gameState.currentPlayerIndex, gameState.status]);
@@ -800,260 +486,320 @@ export default function App() {
     }
   }, [gameState.discardPile, gameState.status, gameState.pendingWildColorPlayerIndex, gameState.isReverseActive, gameState.jumpInPlayerId]);
 
-  const renderLobby = () => (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-white p-6">
-      <motion.div
-        initial={{ y: -50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="relative mb-20 group cursor-default select-none"
-      >
-        <div className="relative">
-          {/* Main Comic Bubble Wrapper */}
-          <motion.div
-            animate={{ rotate: [-2, 1, -2] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            className="relative"
-          >
-            <svg width="360" height="240" viewBox="0 0 140 100" className="fill-white stroke-black stroke-[4px] drop-shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
-              <path d="M20,50 L10,30 L40,25 L50,5 L80,20 L110,5 L125,30 L150,45 L130,70 L140,95 L100,80 L70,100 L50,80 L20,95 L30,70 L10,65 Z" />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center -mt-4">
-              <div className="text-8xl font-black italic tracking-tighter flex gap-1 transform -rotate-3">
-                {"UNO".split('').map((c, i) => (
-                  <motion.span
-                    key={i}
-                    whileHover={{ scale: 1.2, y: -10 }}
-                    className={cn(i === 0 ? "text-red-500" : i === 1 ? "text-blue-500" : "text-emerald-500")}
-                  >
-                    {c}
-                  </motion.span>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Royale Badge */}
-          <motion.div
-            initial={{ scale: 0, rotate: 20 }}
-            animate={{ scale: 1, rotate: 8 }}
-            onClick={() => {
-              const newClicks = devClicks + 1;
-              if (newClicks >= 5) {
-                setGameState(prev => ({ ...prev, isDevMode: true }));
-                playSound('item');
-                setDevClicks(0);
-              } else {
-                setDevClicks(newClicks);
-                playSound('click');
-              }
-            }}
-            whileHover={{ rotate: 0, scale: 1.1 }}
-            className={cn(
-              "absolute -bottom-4 -right-16 bg-yellow-400 border-4 border-black px-10 py-4 rounded-3xl shadow-[15px_15px_0_rgba(0,0,0,1)] transform cursor-pointer transition-all",
-              gameState.isDevMode && "bg-emerald-500 shadow-[15px_15px_0_rgba(16,185,129,1)]"
-            )}
-          >
-            <span className="text-4xl font-black italic tracking-tighter text-black uppercase">
-              {gameState.isDevMode ? 'DEV MODE' : 'Royale'}
-            </span>
-          </motion.div>
-        </div>
-      </motion.div>
-
-      <div className="w-full max-w-md space-y-6 bg-zinc-900/50 p-8 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl">
-        {!gameState.roomCode ? (
-          <>
-            <div className="space-y-2">
-              <label className="block text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">玩家昵称</label>
-              <input
-                type="text"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="输入你的名字..."
-                className="w-full bg-zinc-800 border-2 border-zinc-700 rounded-xl px-4 py-3 focus:border-white outline-none transition-all font-bold"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={createRoom}
-                onMouseEnter={() => playSound('btnHover')}
-                disabled={!playerName}
-                className="flex items-center justify-center gap-2 bg-white text-black font-black py-4 rounded-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
-              >
-                <Plus size={20} /> 创建房间
-              </button>
-              <div className="relative">
-                <button
-                  onClick={joinRoom}
-                  onMouseEnter={() => playSound('btnHover')}
-                  disabled={!playerName || !inputRoomCode}
-                  className="w-full flex items-center justify-center gap-2 bg-zinc-800 border-2 border-zinc-700 text-white font-black py-4 rounded-xl hover:bg-zinc-700 transition-all disabled:opacity-50"
-                >
-                  <LogIn size={20} /> 加入房间
-                </button>
-              </div>
-            </div>
-
-            <input
-              type="text"
-              value={inputRoomCode}
-              onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
-              placeholder="房间代码..."
-              className="w-full bg-zinc-800/50 border-2 border-zinc-700/50 rounded-xl px-4 py-2 text-center font-mono tracking-widest focus:border-zinc-500 outline-none transition-all"
-            />
-          </>
-        ) : (
-          <div className="space-y-8">
-            <div className="text-center">
-              <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">房间代码</p>
-              <h2 className="text-5xl font-black tracking-widest font-mono">{gameState.roomCode}</h2>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-                  <Users size={14} /> 玩家 ({gameState.players.length}/10)
-                </p>
-                <div className="flex items-center gap-2 bg-zinc-800/80 p-1 rounded-lg border border-white/5">
-                  <button
-                    onClick={() => {
-                      if (aiCount > 1) {
-                        const newCount = aiCount - 1;
-                        setAiCount(newCount);
-                        const local = gameState.players.find(p => p.isLocal)!;
-                        const newAis = Array.from({ length: newCount }).map((_, i) => ({
-                          id: `ai-${i}`,
-                          name: `机器人 ${i + 1}`,
-                          hand: [],
-                          isLocal: false,
-                          hasShoutedUNO: false,
-                          difficulty: aiDifficulty,
-                        }));
-                        setGameState(prev => ({ ...prev, players: [local, ...newAis] }));
-                        playSound('click');
-                      }
-                    }}
-                    className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-white/10 transition-colors text-zinc-400 hover:text-white"
-                  >
-                    -
-                  </button>
-                  <span className="text-xs font-black min-w-[2ch] text-center">{aiCount}</span>
-                  <button
-                    onClick={() => {
-                      if (aiCount < 9) {
-                        const newCount = aiCount + 1;
-                        setAiCount(newCount);
-                        const local = gameState.players.find(p => p.isLocal)!;
-                        const newAis = Array.from({ length: newCount }).map((_, i) => ({
-                          id: `ai-${i}`,
-                          name: `机器人 ${i + 1}`,
-                          hand: [],
-                          isLocal: false,
-                          hasShoutedUNO: false,
-                          difficulty: aiDifficulty,
-                        }));
-                        setGameState(prev => ({ ...prev, players: [local, ...newAis] }));
-                        playSound('click');
-                      }
-                    }}
-                    className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-white/10 transition-colors text-zinc-400 hover:text-white"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between bg-zinc-900/40 p-3 rounded-xl border border-white/5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                  全场 AI 难度
-                </p>
-                <div className="flex bg-zinc-800/80 p-1 rounded-lg border border-white/5">
-                  {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => {
-                        setAiDifficulty(d);
-                        playSound('click');
-                        setGameState(prev => ({
-                          ...prev,
-                          players: prev.players.map(p => p.isLocal ? p : { ...p, difficulty: d })
-                        }));
-                      }}
-                      className={cn(
-                        "px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tighter transition-all",
-                        aiDifficulty === d
-                          ? (d === 'hard' ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]" : "bg-white text-black shadow-lg")
-                          : "text-zinc-500 hover:text-white"
-                      )}
+  const renderLobby = () => {
+    const isHost = gameState.players.length > 0 && gameState.players[0].isLocal;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-white p-6">
+        <motion.div
+          initial={{ y: -50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="relative mb-20 group cursor-default select-none"
+        >
+          <div className="relative">
+            {/* Main Comic Bubble Wrapper */}
+            <motion.div
+              animate={{ rotate: [-2, 1, -2] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              className="relative"
+            >
+              <svg width="360" height="240" viewBox="0 0 140 100" className="fill-white stroke-black stroke-[4px] drop-shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
+                <path d="M20,50 L10,30 L40,25 L50,5 L80,20 L110,5 L125,30 L150,45 L130,70 L140,95 L100,80 L70,100 L50,80 L20,95 L30,70 L10,65 Z" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center -mt-4">
+                <div className="text-8xl font-black italic tracking-tighter flex gap-1 transform -rotate-3">
+                  {"UNO".split('').map((c, i) => (
+                    <motion.span
+                      key={i}
+                      whileHover={{ scale: 1.2, y: -10 }}
+                      className={cn(i === 0 ? "text-red-500" : i === 1 ? "text-blue-500" : "text-emerald-500")}
                     >
-                      {d === 'easy' ? '新手' : d === 'medium' ? '高手' : '噩梦'}
-                    </button>
+                      {c}
+                    </motion.span>
                   ))}
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
-                {gameState.players.map((p) => (
-                  <motion.div
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    key={p.id}
-                    className="flex items-center justify-between bg-zinc-800/50 p-3 rounded-xl border border-white/5"
+            </motion.div>
+
+            {/* Royale Badge */}
+            <motion.div
+              initial={{ scale: 0, rotate: 20 }}
+              animate={{ scale: 1, rotate: 8 }}
+              onClick={() => {
+                const newClicks = devClicks + 1;
+                if (newClicks >= 5) {
+                  setGameState(prev => ({ ...prev, isDevMode: true }));
+                  playSound('item');
+                  setDevClicks(0);
+                } else {
+                  setDevClicks(newClicks);
+                  playSound('click');
+                }
+              }}
+              whileHover={{ rotate: 0, scale: 1.1 }}
+              className={cn(
+                "absolute -bottom-4 -right-16 bg-yellow-400 border-4 border-black px-10 py-4 rounded-3xl shadow-[15px_15px_0_rgba(0,0,0,1)] transform cursor-pointer transition-all",
+                gameState.isDevMode && "bg-emerald-500 shadow-[15px_15px_0_rgba(16,185,129,1)]"
+              )}
+            >
+              <span className="text-4xl font-black italic tracking-tighter text-black uppercase">
+                {gameState.isDevMode ? 'DEV MODE' : 'Royale'}
+              </span>
+            </motion.div>
+          </div>
+        </motion.div>
+
+        <div className="w-full max-w-md space-y-6 bg-zinc-900/50 p-8 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl">
+          {!gameState.roomCode ? (
+            <>
+              <div className="flex flex-col items-center justify-center py-4">
+                <button
+                  onClick={() => {
+                    socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
+                    setShowRoomHall(true);
+                  }}
+                  onMouseEnter={() => playSound('btnHover')}
+                  className="w-full flex items-center justify-center gap-3 bg-white text-black font-black py-6 rounded-2xl hover:scale-105 active:scale-95 transition-all text-xl shadow-[0_10px_30px_rgba(255,255,255,0.2)]"
+                >
+                  <Globe size={24} /> 进入游戏大厅
+                </button>
+                <p className="mt-8 text-zinc-500 text-[10px] font-bold uppercase tracking-widest text-center">
+                  在这里创建或加入多人游戏
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-8">
+              <div className="text-center relative group">
+                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">房间代码</p>
+                <div className="flex items-center justify-center gap-3">
+                  <h2 className="text-5xl font-black tracking-widest font-mono select-all">{gameState.roomCode}</h2>
+                  <button
+                    onClick={() => {
+                      const text = gameState.roomCode;
+                      const copy = async () => {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                          try {
+                            await navigator.clipboard.writeText(text);
+                            return true;
+                          } catch (err) {
+                            console.error('Clipboard API failed', err);
+                          }
+                        }
+
+                        // Fallback: execCommand
+                        try {
+                          const textArea = document.createElement("textarea");
+                          textArea.value = text;
+                          textArea.style.position = "fixed";
+                          textArea.style.left = "-9999px";
+                          textArea.style.top = "0";
+                          document.body.appendChild(textArea);
+                          textArea.focus();
+                          textArea.select();
+                          const success = document.execCommand('copy');
+                          document.body.removeChild(textArea);
+                          return success;
+                        } catch (err) {
+                          console.error('Fallback copy failed', err);
+                          return false;
+                        }
+                      };
+
+                      copy().then(success => {
+                        if (success) {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                          playSound('click');
+                        }
+                      });
+                    }}
+                    className="p-2 bg-zinc-800/50 hover:bg-zinc-800 rounded-lg border border-white/5 hover:border-white/20 transition-all text-zinc-400 hover:text-white"
                   >
-                    <span className="font-bold">{p.name} {p.isLocal && <span className="text-xs text-zinc-500">(你)</span>}</span>
-                    <div className="flex items-center gap-2">
-                      {p.isLocal && <span className="text-[10px] bg-white text-black px-2 py-0.5 rounded-full font-black">房主</span>}
-                      {!p.isLocal && (
-                        <button
-                          onClick={() => kickPlayer(p.id)}
-                          className="p-1.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm"
-                          title="踢出玩家"
-                        >
-                          <LogOut size={12} />
-                        </button>
-                      )}
+                    {copied ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                    <Users size={14} /> 玩家 ({gameState.players.length}/10)
+                  </p>
+                  {isHost && (
+                    <div className="flex items-center gap-2 bg-zinc-800/80 p-1 rounded-lg border border-white/5">
+                      <button
+                        onClick={() => {
+                          if (aiCount > 0) {
+                            const newCount = aiCount - 1;
+                            setAiCount(newCount);
+                            socketRef.current?.send(JSON.stringify({
+                              type: 'UPDATE_AI_SETTINGS',
+                              payload: { aiCount: newCount, difficulty: aiDifficulty }
+                            }));
+                            playSound('click');
+                          }
+                        }}
+                        disabled={!isHost}
+                        className={cn(
+                          "w-8 h-8 flex items-center justify-center rounded-md hover:bg-white/10 transition-colors text-zinc-400 hover:text-white",
+                          !isHost && "opacity-0 pointer-events-none"
+                        )}
+                      >
+                        -
+                      </button>
+                      <span className="text-xs font-black min-w-[2ch] text-center">{aiCount}</span>
+                      <button
+                        onClick={() => {
+                          if (aiCount < 9) {
+                            const newCount = aiCount + 1;
+                            setAiCount(newCount);
+                            socketRef.current?.send(JSON.stringify({
+                              type: 'UPDATE_AI_SETTINGS',
+                              payload: { aiCount: newCount, difficulty: aiDifficulty }
+                            }));
+                            playSound('click');
+                          }
+                        }}
+                        disabled={!isHost}
+                        className={cn(
+                          "w-8 h-8 flex items-center justify-center rounded-md hover:bg-white/10 transition-colors text-zinc-400 hover:text-white",
+                          !isHost && "opacity-0 pointer-events-none"
+                        )}
+                      >
+                        +
+                      </button>
                     </div>
-                  </motion.div>
-                ))}
+                  )}
+                </div>
+
+                {isHost && aiCount > 0 && (
+                  <div className="flex items-center justify-between bg-zinc-900/40 p-3 rounded-xl border border-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      全场 AI 难度
+                    </p>
+                    <div className="flex bg-zinc-800/80 p-1 rounded-lg border border-white/5">
+                      {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => {
+                            if (!isHost) return;
+                            setAiDifficulty(d);
+                            playSound('click');
+                            socketRef.current?.send(JSON.stringify({
+                              type: 'UPDATE_AI_SETTINGS',
+                              payload: { aiCount, difficulty: d }
+                            }));
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tighter transition-all",
+                            !isHost && "pointer-events-none opacity-50",
+                            aiDifficulty === d
+                              ? (d === 'hard' ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]" : "bg-white text-black shadow-lg")
+                              : "text-zinc-500 hover:text-white"
+                          )}
+                        >
+                          {d === 'easy' ? '新手' : d === 'medium' ? '高手' : '噩梦'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                  {gameState.players.map((p, index) => (
+                    <motion.div
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      key={p.id}
+                      className="flex items-center justify-between bg-zinc-800/50 p-3 rounded-xl border border-white/5"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">{p.name}</span>
+                        {p.isLocal && <span className="text-[10px] text-zinc-500 font-bold">(你)</span>}
+                        {index === 0 && <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">房主</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Only host can kick others */}
+                        {gameState.players[0]?.isLocal && !p.isLocal && (
+                          <button
+                            onClick={() => kickPlayer(p.id)}
+                            className="p-1.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm"
+                            title="踢出玩家"
+                          >
+                            <LogOut size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={leaveLobby}
+                  onMouseEnter={() => playSound('btnHover')}
+                  className="flex-1 flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 font-bold py-4 rounded-xl hover:bg-zinc-700 hover:text-white transition-all active:scale-95"
+                >
+                  <ChevronLeft size={20} /> 返回
+                </button>
+                <button
+                  onClick={startGame}
+                  disabled={!isHost || gameState.players.length < 2}
+                  onMouseEnter={() => playSound('btnHover')}
+                  className={cn(
+                    "flex-[2] flex items-center justify-center gap-2 bg-emerald-500 text-white font-black py-4 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)]",
+                    (!isHost || gameState.players.length < 2) && "opacity-50 grayscale pointer-events-none"
+                  )}
+                >
+                  {isHost ? (
+                    <>
+                      <Play size={20} fill="currentColor" /> 开始游戏
+                    </>
+                  ) : (
+                    "等待房主开始..."
+                  )}
+                </button>
               </div>
             </div>
-
-            <div className="flex gap-4">
-              <button
-                onClick={leaveLobby}
-                onMouseEnter={() => playSound('btnHover')}
-                className="flex-1 flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 font-bold py-4 rounded-xl hover:bg-zinc-700 hover:text-white transition-all active:scale-95"
-              >
-                <ChevronLeft size={20} /> 返回
-              </button>
-              <button
-                onClick={startGame}
-                onMouseEnter={() => playSound('btnHover')}
-                className="flex-[2] flex items-center justify-center gap-2 bg-emerald-500 text-white font-black py-4 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)]"
-              >
-                <Play size={20} fill="currentColor" /> 开始游戏
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderGame = () => {
-    const localPlayer = gameState.players.find(p => p.isLocal)!;
-    const isLocalTurn = gameState.players[gameState.currentPlayerIndex].isLocal;
+    const localPlayer = gameState.players.find(p => p.isLocal);
+    if (!localPlayer || gameState.players.length === 0) return null;
+
+    const isHost = gameState.players.length > 0 && gameState.players[0].isLocal;
+    const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal ?? false;
     const topCard = gameState.discardPile[gameState.discardPile.length - 1];
     const currentWildColor = gameState.currentWildColor;
     const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
-    const isLocalPendingColor = gameState.pendingWildColorPlayerIndex !== null && gameState.players[gameState.pendingWildColorPlayerIndex].isLocal;
+    const isLocalPendingColor = gameState.pendingWildColorPlayerIndex !== null && (gameState.players[gameState.pendingWildColorPlayerIndex]?.isLocal ?? false);
     const isAnimating = gameState.isReverseActive || !!gameState.jumpInPlayerId;
+    const isLocalPendingUno = gameState.pendingUNOPlayerId !== null && gameState.pendingUNOPlayerId === localPlayer.id;
 
     return (
       <motion.div
         animate={shake ? { x: [-10, 10, -10, 10, 0], y: [-5, 5, -5, 5, 0] } : {}}
         className="relative min-h-screen bg-zinc-950 text-white overflow-hidden flex flex-col"
       >
+        {/* Player Left Overlay */}
+        <AnimatePresence>
+          {gameState.playerLeftMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -50 }}
+              className="absolute top-20 left-1/2 -translate-x-1/2 z-[2000] bg-orange-500 text-white px-8 py-4 rounded-full shadow-[0_20px_40px_rgba(249,115,22,0.5)] border-4 border-white flex items-center gap-3"
+            >
+              <LogOut size={24} />
+              <span className="text-xl font-black tracking-widest">{gameState.playerLeftMessage}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Color Picker Overlay */}
         <AnimatePresence>
           {isLocalPendingColor && (
@@ -1371,116 +1117,122 @@ export default function App() {
         <div className="flex-1 relative flex items-center justify-center -mt-8">
           {/* AI Players Hands (Simplified) */}
           <div className="absolute inset-0 pointer-events-none">
-            {gameState.players.map((p, i) => {
-              if (p.isLocal) return null;
+            {(() => {
+              const localIndex = gameState.players.findIndex(p => p.isLocal);
+              return gameState.players.map((p, i) => {
+                if (p.isLocal) return null;
 
-              const playerCount = gameState.players.length;
-              const isLarge = playerCount > 6;
-              const radiusH = isLarge ? 38 : 42;
-              const radiusV = isLarge ? 32 : 38;
-              const iconScale = isLarge ? 0.8 : 1;
+                const playerCount = gameState.players.length;
+                const isLarge = playerCount > 6;
+                const radiusH = isLarge ? 38 : 42;
+                const radiusV = isLarge ? 32 : 38;
+                const iconScale = isLarge ? 0.8 : 1;
 
-              // Position AI players around the board, starting from the bottom (local player position)
-              const angle = (i / playerCount) * Math.PI * 2 + Math.PI / 2;
-              return (
-                <div
-                  key={p.id}
-                  className="absolute transition-all duration-500"
-                  style={{
-                    left: `${50 + Math.cos(angle) * radiusH}%`,
-                    top: `${45 + Math.sin(angle) * radiusV}%`,
-                    transform: `translate(-50%, -50%) scale(${iconScale})`
-                  }}
-                >
-                  <div className={cn(
-                    "flex flex-col items-center rounded-3xl transition-all",
-                    isLarge ? "gap-1 p-2" : "gap-2 p-4",
-                    gameState.currentPlayerIndex === i ? "bg-emerald-500/10 scale-110" : "opacity-60"
-                  )}>
-                    <div className="relative">
-                      <AnimatePresence>
-                        {p.hasShoutedUNO && (
-                          <motion.div key="uno">
-                            <ComicBubble text="UNO !!!" />
-                          </motion.div>
-                        )}
-                        {gameState.jumpInPlayerId === p.id && (
-                          <motion.div key="jump">
-                            <ComicBubble
-                              text="JUMP IN!"
-                              color="yellow"
-                              className={p.hasShoutedUNO ? "-top-40" : ""}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                      <div
-                        onMouseEnter={() => seeAllHands && setHoveredGodModePlayerId(p.id)}
-                        onMouseLeave={() => setHoveredGodModePlayerId(null)}
-                        className={cn(
-                          "w-12 h-16 bg-zinc-800 rounded-lg border-2 border-zinc-700 flex flex-col items-center justify-center shadow-xl relative overflow-hidden transition-all",
-                          seeAllHands && "cursor-zoom-in hover:border-emerald-500/50 hover:scale-110"
-                        )}
-                      >
-                        <span className="text-xs font-black">{p.hand.length}</span>
-                        {seeAllHands && (
-                          <>
-                            <div className="absolute inset-0 bg-black/80 flex flex-wrap gap-0.5 p-1 items-center justify-center overflow-y-auto">
-                              {p.hand.map((c, i) => (
-                                <div key={i} className={cn("w-1.5 h-2 rounded-[1px]",
-                                  c.color === 'red' ? 'bg-red-500' :
-                                    c.color === 'blue' ? 'bg-blue-500' :
-                                      c.color === 'green' ? 'bg-green-500' :
-                                        c.color === 'yellow' ? 'bg-yellow-400' : 'bg-white'
-                                )} title={c.value} />
-                              ))}
-                            </div>
+                // Calculate relative index so localIndex is at the bottom
+                // (i - localIndex) shifts the current player relative to the observer
+                const relativeIndex = (i - localIndex + playerCount) % playerCount;
+                const angle = (relativeIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
 
-                            {/* Detailed Hover Overlay */}
-                            <AnimatePresence>
-                              {hoveredGodModePlayerId === p.id && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.5, y: 10 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.5, y: 10 }}
-                                  className="absolute left-1/2 -bottom-2 translate-y-full -translate-x-1/2 z-[1000] bg-zinc-900 border border-white/20 p-2 rounded-xl shadow-2xl flex flex-wrap gap-1 min-w-[120px] max-w-[200px] justify-center pointer-events-none"
-                                >
-                                  {p.hand.map((card, idx) => (
-                                    <div
-                                      key={card.id + idx}
-                                      className={cn(
-                                        "w-6 h-8 rounded-md border border-black/20 flex items-center justify-center text-[8px] font-black",
-                                        card.color === 'red' ? 'bg-red-500' :
-                                          card.color === 'blue' ? 'bg-blue-500' :
-                                            card.color === 'green' ? 'bg-green-500' :
-                                              card.color === 'yellow' ? 'bg-yellow-400' : 'bg-zinc-100 text-black'
-                                      )}
-                                    >
-                                      {card.value === 'draw2' ? '+2' :
-                                        card.value === 'draw4' ? '+4' :
-                                          card.value === 'skip' ? 'S' :
-                                            card.value === 'reverse' ? 'R' :
-                                              card.value === 'wild' ? 'W' : card.value}
-                                    </div>
-                                  ))}
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </>
+                return (
+                  <div
+                    key={p.id}
+                    className="absolute transition-all duration-500"
+                    style={{
+                      left: `${50 + Math.cos(angle) * radiusH}%`,
+                      top: `${45 + Math.sin(angle) * radiusV}%`,
+                      transform: `translate(-50%, -50%) scale(${iconScale})`
+                    }}
+                  >
+                    <div className={cn(
+                      "flex flex-col items-center rounded-3xl transition-all",
+                      isLarge ? "gap-1 p-2" : "gap-2 p-4",
+                      gameState.currentPlayerIndex === i ? "bg-emerald-500/10 scale-110" : "opacity-60"
+                    )}>
+                      <div className="relative">
+                        <AnimatePresence>
+                          {p.hasShoutedUNO && (
+                            <motion.div key="uno">
+                              <ComicBubble text="UNO !!!" />
+                            </motion.div>
+                          )}
+                          {gameState.jumpInPlayerId === p.id && (
+                            <motion.div key="jump">
+                              <ComicBubble
+                                text="JUMP IN!"
+                                color="yellow"
+                                className={p.hasShoutedUNO ? "-top-40" : ""}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <div
+                          onMouseEnter={() => seeAllHands && setHoveredGodModePlayerId(p.id)}
+                          onMouseLeave={() => setHoveredGodModePlayerId(null)}
+                          className={cn(
+                            "w-12 h-16 bg-zinc-800 rounded-lg border-2 border-zinc-700 flex flex-col items-center justify-center shadow-xl relative overflow-hidden transition-all",
+                            seeAllHands && "cursor-zoom-in hover:border-emerald-500/50 hover:scale-110"
+                          )}
+                        >
+                          <span className="text-xs font-black">{p.hand.length}</span>
+                          {seeAllHands && (
+                            <>
+                              <div className="absolute inset-0 bg-black/80 flex flex-wrap gap-0.5 p-1 items-center justify-center overflow-y-auto">
+                                {p.hand.map((c, i) => (
+                                  <div key={i} className={cn("w-1.5 h-2 rounded-[1px]",
+                                    c.color === 'red' ? 'bg-red-500' :
+                                      c.color === 'blue' ? 'bg-blue-500' :
+                                        c.color === 'green' ? 'bg-green-500' :
+                                          c.color === 'yellow' ? 'bg-yellow-400' : 'bg-white'
+                                  )} title={c.value} />
+                                ))}
+                              </div>
+
+                              {/* Detailed Hover Overlay */}
+                              <AnimatePresence>
+                                {hoveredGodModePlayerId === p.id && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.5, y: 10 }}
+                                    className="absolute left-1/2 -bottom-2 translate-y-full -translate-x-1/2 z-[1000] bg-zinc-900 border border-white/20 p-2 rounded-xl shadow-2xl flex flex-wrap gap-1 min-w-[120px] max-w-[200px] justify-center pointer-events-none"
+                                  >
+                                    {p.hand.map((card, idx) => (
+                                      <div
+                                        key={card.id + idx}
+                                        className={cn(
+                                          "w-6 h-8 rounded-md border border-black/20 flex items-center justify-center text-[8px] font-black",
+                                          card.color === 'red' ? 'bg-red-500' :
+                                            card.color === 'blue' ? 'bg-blue-500' :
+                                              card.color === 'green' ? 'bg-green-500' :
+                                                card.color === 'yellow' ? 'bg-yellow-400' : 'bg-zinc-100 text-black'
+                                        )}
+                                      >
+                                        {card.value === 'draw2' ? '+2' :
+                                          card.value === 'draw4' ? '+4' :
+                                            card.value === 'skip' ? 'S' :
+                                              card.value === 'reverse' ? 'R' :
+                                                card.value === 'wild' ? 'W' : card.value}
+                                      </div>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </>
+                          )}
+                        </div>
+                        {gameState.currentPlayerIndex === i && (
+                          <motion.div
+                            layoutId="active-indicator"
+                            className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full animate-pulse"
+                          />
                         )}
                       </div>
-                      {gameState.currentPlayerIndex === i && (
-                        <motion.div
-                          layoutId="active-indicator"
-                          className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full animate-pulse"
-                        />
-                      )}
+                      <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>
                     </div>
-                    <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>
                   </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
 
           {/* Center Pile */}
@@ -1618,7 +1370,7 @@ export default function App() {
 
           {/* UNO Button */}
           <AnimatePresence>
-            {gameState.pendingUNOPlayerId === 'local-player' && (
+            {isLocalPendingUno && (
               <motion.div
                 initial={{ scale: 0, y: 50 }}
                 animate={{ scale: 1, y: 0 }}
@@ -1628,7 +1380,7 @@ export default function App() {
                 <motion.button
                   whileHover={{ scale: 1.1, rotate: 5 }}
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => shoutUNO('local-player')}
+                  onClick={() => shoutUNO(localPlayer.id)}
                   className="relative group"
                 >
                   <div className="absolute -inset-4 bg-orange-500 rounded-full blur-2xl opacity-50 animate-pulse" />
@@ -1670,47 +1422,57 @@ export default function App() {
                   {selectedCardId ? (
                     <motion.button
                       key="play-btn"
+                      initial={{ scale: 0.8, y: 10, opacity: 0 }}
+                      animate={{ scale: 1, y: 0, opacity: 1 }}
+                      exit={{ scale: 0.8, y: 10, opacity: 0 }}
+                      onClick={() => playCard(gameState.currentPlayerIndex, selectedCardId)}
+                      className="px-10 py-2.5 bg-emerald-500 text-white text-sm font-black uppercase tracking-widest rounded-full shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                    >
+                      <Play size={16} fill="currentColor" /> 确定出牌
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      key="draw-btn"
                       initial={{ scale: 0.8, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       exit={{ scale: 0.8, opacity: 0 }}
-                      onClick={() => playCard(gameState.currentPlayerIndex, selectedCardId)}
-                      className="px-8 py-2 bg-white text-black text-xs font-black uppercase tracking-widest rounded-full shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                      onClick={() => {
+                        setSelectedCardId(null);
+                        drawCard(gameState.currentPlayerIndex);
+                      }}
+                      className={cn(
+                        "px-10 py-2.5 text-sm font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
+                        gameState.drawStack > 0
+                          ? "bg-red-500 text-white shadow-[0_10px_30px_rgba(239,68,68,0.4)] hover:scale-105 active:scale-95"
+                          : "bg-amber-500 text-white shadow-[0_10px_40px_rgba(245,158,11,0.4)] hover:bg-amber-400"
+                      )}
                     >
-                      <Play size={14} fill="currentColor" /> 出牌
+                      <RefreshCw size={16} className={cn(gameState.drawStack > 0 && "animate-spin-slow")} />
+                      {gameState.drawStack > 0 ? `认罚！摸 ${gameState.drawStack} 张` : '直接摸牌'}
                     </motion.button>
-                  ) : (
-                    !localPlayer.hand.some(c => canPlayCard(c, topCard, gameState.drawStack, gameState.currentWildColor, lastNumberValue)) && (
-                      <motion.button
-                        key="draw-btn"
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.8, opacity: 0 }}
-                        onClick={() => drawCard(gameState.currentPlayerIndex)}
-                        className="px-8 py-2 bg-emerald-500 text-white text-xs font-black uppercase tracking-widest rounded-full shadow-[0_0_40px_rgba(16,185,129,0.3)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-                      >
-                        <RefreshCw size={14} /> {gameState.drawStack > 0 ? `摸 ${gameState.drawStack} 张` : '摸牌'}
-                      </motion.button>
-                    )
                   )}
                 </div>
               ) : (
-                selectedCardId && !isAnimating && (
-                  <motion.button
-                    key="jump-btn"
-                    initial={{ scale: 0, rotate: -20 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    exit={{ scale: 0, rotate: 20 }}
-                    onMouseEnter={() => playSound('btnHover')}
-                    onClick={() => {
-                      const localPlayerIndex = gameState.players.findIndex(p => p.isLocal);
-                      playSound('jump');
-                      playCard(localPlayerIndex, selectedCardId);
-                    }}
-                    className="px-10 py-3 bg-yellow-400 text-black text-sm font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
-                  >
-                    <Zap size={18} fill="currentColor" /> 绝地抢牌！
-                  </motion.button>
-                )
+                (() => {
+                  const selectedCard = localPlayer.hand.find(c => c.id === selectedCardId);
+                  return selectedCardId && !isAnimating && selectedCard && canJumpIn(selectedCard, topCard, gameState.drawStack) && (
+                    <motion.button
+                      key="jump-btn"
+                      initial={{ scale: 0, rotate: -20 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      exit={{ scale: 0, rotate: 20 }}
+                      onMouseEnter={() => playSound('btnHover')}
+                      onClick={() => {
+                        const localPlayerIndex = gameState.players.findIndex(p => p.isLocal);
+                        playSound('jump');
+                        playCard(localPlayerIndex, selectedCardId);
+                      }}
+                      className="px-10 py-3 bg-yellow-400 text-black text-sm font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
+                    >
+                      <Zap size={18} fill="currentColor" /> 绝地抢牌！
+                    </motion.button>
+                  );
+                })()
               )}
             </AnimatePresence>
           </div>
@@ -1818,8 +1580,8 @@ export default function App() {
   };
 
   const renderEnd = () => {
-    const localPlayer = gameState.players.find(p => p.isLocal)!;
-    const isWin = gameState.winner === localPlayer.name;
+    const localPlayer = gameState.players.find(p => p.isLocal);
+    const isWin = localPlayer && gameState.winner === localPlayer.name;
 
     return (
       <div className="fixed inset-0 z-[2000] flex items-center justify-center pointer-events-none">
@@ -1890,13 +1652,6 @@ export default function App() {
 
             <div className="flex flex-col items-center gap-4 mt-16 w-full">
               <button
-                onClick={startGame}
-                className="w-full flex items-center justify-center gap-3 bg-white text-black font-black px-12 py-4 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-[0_20px_40px_rgba(255,255,255,0.2)]"
-              >
-                <RefreshCw size={20} /> 再次挑战
-              </button>
-
-              <button
                 onClick={() => setGameState(prev => ({ ...prev, status: 'lobby', roomCode: '' }))}
                 className="text-zinc-500 font-bold hover:text-white transition-colors text-xs uppercase tracking-widest"
               >
@@ -1914,6 +1669,172 @@ export default function App() {
       {gameState.status === 'lobby' && renderLobby()}
       {(gameState.status === 'playing' || gameState.status === 'ended') && renderGame()}
       {gameState.status === 'ended' && renderEnd()}
+
+      {/* Room Hall Modal */}
+      <AnimatePresence>
+        {showRoomHall && (
+          <div className="fixed inset-0 z-[5000] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowRoomHall(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-zinc-900 border border-white/10 rounded-3xl p-8 w-full max-w-md shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-black italic tracking-tighter uppercase flex items-center gap-2">
+                  <Globe className="text-emerald-500" /> 游戏大厅
+                </h3>
+                <button
+                  onClick={() => setShowRoomHall(false)}
+                  className="p-2 hover:bg-white/10 rounded-full text-zinc-500 hover:text-white transition-all"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+              </div>
+
+              {/* Quick Name Input & Create/Join Actions within Hall */}
+              <div className={cn(
+                "mb-6 flex flex-col gap-4 p-5 rounded-3xl border transition-all",
+                !playerName ? "bg-amber-500/5 border-amber-500/20 shadow-[0_0_20px_rgba(245,158,11,0.05)]" : "bg-zinc-800/30 border-white/5"
+              )}>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={cn(
+                      "text-xs font-black uppercase tracking-widest",
+                      !playerName ? "text-amber-500" : "text-zinc-400"
+                    )}>
+                      {!playerName ? "⚠️ 请先设置昵称" : "第一步：输入昵称"}
+                    </label>
+                    {playerName && <Check size={14} className="text-emerald-500" />}
+                  </div>
+                  <input
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="输入你的名字..."
+                    className="w-full bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 focus:border-emerald-500/50 outline-none transition-all font-bold text-sm"
+                  />
+                </div>
+
+                <div className="pt-4 border-t border-white/5 flex flex-col gap-3">
+                  <label className="text-xs font-black uppercase tracking-widest text-zinc-400">第二步：加入或创建房间</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inputRoomCode}
+                      onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
+                      placeholder="输入 4 位房间代码..."
+                      className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!playerName || !inputRoomCode) return;
+                        joinRoom();
+                        setShowRoomHall(false);
+                      }}
+                      onMouseEnter={() => playSound('btnHover')}
+                      disabled={!playerName || !inputRoomCode}
+                      className="bg-zinc-700 text-white px-6 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-50 disabled:grayscale font-bold flex items-center gap-2"
+                    >
+                      <LogIn size={14} /> 加入
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">大厅中正在等待的房间</span>
+              </div>
+              <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-2 custom-scrollbar">
+                {activeRooms.length === 0 ? (
+                  <div className="text-center py-12 text-zinc-500 italic">
+                    目前没有正在等待的房间...
+                  </div>
+                ) : (
+                  activeRooms.map((room) => (
+                    <div
+                      key={room.code}
+                      className="w-full flex items-center justify-between p-4 bg-zinc-800/50 border border-white/5 rounded-2xl transition-all"
+                    >
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none">房间信息</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl font-black font-mono tracking-widest uppercase text-white">{room.code}</span>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-zinc-400 whitespace-nowrap">房主: {room.hostName || '未知'}</span>
+                            <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
+                              <Users size={10} /> {room.playerCount}/10
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (!playerName) {
+                            setShowRoomHall(false);
+                            // Focus on name input if possible, but at least close hall
+                            playSound('click');
+                            return;
+                          }
+                          socketRef.current?.send(JSON.stringify({
+                            type: 'JOIN_ROOM',
+                            payload: { playerName, roomCode: room.code }
+                          }));
+                          setInputRoomCode(room.code);
+                          setShowRoomHall(false);
+                          playSound('click');
+                        }}
+                        className={cn(
+                          "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                          playerName
+                            ? "bg-emerald-500 text-white hover:bg-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.2)]"
+                            : "bg-zinc-700 text-zinc-400 cursor-not-allowed"
+                        )}
+                        title={!playerName ? "请先输入昵称" : "点击加入"}
+                      >
+                        {playerName ? '立即加入' : '请输入昵称'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="mt-8 flex flex-col gap-3">
+                <button
+                  onClick={() => {
+                    if (!playerName) return;
+                    createRoom();
+                    setShowRoomHall(false);
+                  }}
+                  onMouseEnter={() => playSound('btnHover')}
+                  disabled={!playerName}
+                  className="w-full bg-emerald-500 text-white px-6 py-3 rounded-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale font-black flex items-center justify-center gap-2 shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
+                >
+                  <Plus size={18} /> 新建公开房间
+                </button>
+
+                <button
+                  onClick={() => {
+                    socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
+                    playSound('click');
+                  }}
+                  className="w-full py-3 bg-zinc-800 text-zinc-400 hover:text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={14} /> 刷新大厅
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

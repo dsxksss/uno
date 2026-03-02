@@ -79,4 +79,5 @@ type GameState struct {
 	JumpInPlayerID              string     `json:"jumpInPlayerId"`
 	IsReverseActive             bool       `json:"isReverseActive"`
 	IsDevMode                   bool       `json:"isDevMode"`
+	PlayerLeftMessage           string     `json:"playerLeftMessage,omitempty"`
 }

@@ -92,7 +92,7 @@ func CanPlayCard(card CardData, topCard CardData, drawStack int, currentWildColo
 }
 
 func CanJumpIn(card CardData, topCard CardData) bool {
-	if card.Color == Wild || topCard.Color == Wild {
+	if !IsNumberCard(card) {
 		return false
 	}
 	return card.Color == topCard.Color && card.Value == topCard.Value

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -60,6 +62,7 @@ func (r *Room) StartGame() {
 		TimeLeft:           30,
 		DrawStack:          0,
 		CurrentWildColor:   "",
+		IsDevMode:          false,
 	}
 
 	go r.StartTimer()
@@ -92,6 +95,21 @@ func (r *Room) StartTimer() {
 }
 
 func (r *Room) AutoMove() {
+	if r.State.Status != Playing {
+		return
+	}
+
+	// If someone needs to pick a color, pick one for them
+	if r.State.PendingWildColorPlayerIndex != nil {
+		pIdx := *r.State.PendingWildColorPlayerIndex
+		if pIdx >= 0 && pIdx < len(r.State.Players) {
+			colors := []CardColor{Red, Blue, Green, Yellow}
+			randomColor := colors[rand.Intn(len(colors))]
+			r.ChooseColor(r.State.Players[pIdx].ID, randomColor)
+			return
+		}
+	}
+
 	player := &r.State.Players[r.State.CurrentPlayerIndex]
 	topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
 	lastNum := GetLastNumberValue(r.State.DiscardPile)
@@ -189,11 +207,29 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 		nextPlayerIndex = (nextPlayerIndex + nextDirection + len(r.State.Players)) % len(r.State.Players)
 	}
 
-	r.State.CurrentPlayerIndex = nextPlayerIndex
 	r.State.Direction = nextDirection
-	r.State.TimeLeft = 30
 	r.State.DrawStack = newDrawStack
 	r.State.IsReverseActive = card.Value == Reverse
+
+	if card.Color == Wild || card.Value == Draw4 {
+		r.State.PendingWildColorPlayerIndex = &playerIndex
+		r.State.CurrentPlayerIndex = playerIndex
+		r.State.TimeLeft = 30
+	} else {
+		r.State.CurrentPlayerIndex = nextPlayerIndex
+		r.State.TimeLeft = 30
+		r.State.CurrentWildColor = ""
+		r.State.PendingWildColorPlayerIndex = nil
+	}
+
+	if r.State.IsReverseActive {
+		time.AfterFunc(1500*time.Millisecond, func() {
+			r.Mutex.Lock()
+			r.State.IsReverseActive = false
+			r.Mutex.Unlock()
+			r.UpdateState()
+		})
+	}
 
 	if card.Color == Wild || card.Value == Draw4 {
 		r.State.PendingWildColorPlayerIndex = &playerIndex
@@ -313,4 +349,102 @@ func (r *Room) ChooseColor(playerID string, color CardColor) {
 
 	topCard := &r.State.DiscardPile[len(r.State.DiscardPile)-1]
 	topCard.ChosenColor = color
+
+	// Advance turn now after color is chosen
+	nextPlayerIndex := (r.State.CurrentPlayerIndex + r.State.Direction + len(r.State.Players)) % len(r.State.Players)
+	r.State.CurrentPlayerIndex = nextPlayerIndex
+	r.State.TimeLeft = 30
+}
+
+func (r *Room) UpdateAISettings(playerID string, aiCount int, difficulty Difficulty) {
+	// Only first player (host) can change settings
+	if len(r.State.Players) == 0 || r.State.Players[0].ID != playerID {
+		return
+	}
+
+	if r.State.Status != Lobby {
+		return
+	}
+
+	// Filter current players to keep only humans
+	humans := []Player{}
+	for _, p := range r.State.Players {
+		// Keep all real human players (they have IsLocal set to true in main.go)
+		if p.IsLocal {
+			humans = append(humans, p)
+		}
+	}
+
+	newPlayers := make([]Player, len(humans))
+	copy(newPlayers, humans)
+
+	for i := 0; i < aiCount; i++ {
+		newPlayers = append(newPlayers, Player{
+			ID:            fmt.Sprintf("ai-%d", i),
+			Name:          fmt.Sprintf("机器人 %d", i+1),
+			Hand:          []CardData{},
+			IsLocal:       false,
+			HasShoutedUno: false,
+			Difficulty:    difficulty,
+		})
+	}
+	r.State.Players = newPlayers
+}
+
+func (r *Room) RemovePlayer(playerID string) {
+	newPlayers := []Player{}
+	found := false
+	var leftPlayerName string
+	var leftPlayerHand []CardData
+
+	for _, p := range r.State.Players {
+		if p.ID == playerID {
+			found = true
+			leftPlayerName = p.Name
+			leftPlayerHand = p.Hand
+			continue
+		}
+		newPlayers = append(newPlayers, p)
+	}
+
+	if !found {
+		return
+	}
+
+	r.State.Players = newPlayers
+
+	// If game was playing, we might need to adjust CurrentPlayerIndex
+	if r.State.Status == Playing {
+		if len(newPlayers) <= 1 {
+			if len(newPlayers) == 1 {
+				r.State.Winner = newPlayers[0].Name
+			}
+			r.State.Status = Ended
+			return
+		}
+
+		// Reshuffle the leaving player's cards into the deck
+		if len(leftPlayerHand) > 0 {
+			r.State.Deck = append(r.State.Deck, leftPlayerHand...)
+			r.State.Deck = Shuffle(r.State.Deck)
+		}
+
+		// Show notification
+		r.State.PlayerLeftMessage = fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName)
+		time.AfterFunc(3*time.Second, func() {
+			r.Mutex.Lock()
+			r.State.PlayerLeftMessage = ""
+			r.Mutex.Unlock()
+			r.UpdateState()
+		})
+
+		if r.State.CurrentPlayerIndex >= len(newPlayers) {
+			r.State.CurrentPlayerIndex = 0
+		}
+	}
+}
+
+
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[0:len(prefix)] == prefix
 }
