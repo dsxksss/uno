@@ -271,14 +271,14 @@ export default function App() {
   };
 
   const forceWin = () => {
-    const winnerName = gameState.players[gameState.currentPlayerIndex].name;
+    const winnerName = gameState.players[gameState.currentPlayerIndex]?.name || '未知';
     setGameState(prev => ({
       ...prev,
       status: 'ended',
       winner: winnerName
     }));
 
-    if (gameState.players[gameState.currentPlayerIndex].isLocal) {
+    if (gameState.players[gameState.currentPlayerIndex]?.isLocal) {
       confetti({
         particleCount: 150,
         spread: 70,
@@ -379,7 +379,6 @@ export default function App() {
   const shoutUNO = (playerId: string) => {
     if (!socketRef.current) return;
     socketRef.current.send(JSON.stringify({ type: 'SHOUT_UNO' }));
-    playSound('uno');
   };
 
   // Countdown sound control
@@ -451,109 +450,23 @@ export default function App() {
     prevTotalHandSize.current = currentTotal;
   }, [gameState.players, gameState.status]);
 
-  // Enhanced AI logic
+  // Watch for ANY player shouting UNO
+  const prevUnoDB = useRef<Record<string, boolean>>({});
   useEffect(() => {
-    // Only the host handles AI logic to avoid conflicting/redundant network messages
-    if (gameState.status === 'playing' && isHost) {
-      // Don't act if an overlay animation is playing
-      if (gameState.isReverseActive || gameState.jumpInPlayerId) return;
-      const pendingUNOPlayerId = gameState.pendingUNOPlayerId;
-      if (pendingUNOPlayerId) {
-        const player = gameState.players.find(p => p.id === pendingUNOPlayerId);
-        if (player && !player.isLocal) {
-          const difficulty = player.difficulty || 'medium';
+    if (gameState.status !== 'playing') return;
 
-          let shoutChance = 0.8;
-          let delay = 1000 + Math.random() * 1000;
+    gameState.players.forEach(p => {
+      const wasShouting = prevUnoDB.current[p.id] || false;
+      const isShouting = p.hasShoutedUNO;
 
-          if (difficulty === 'easy') { shoutChance = 0.5; delay = 1500 + Math.random() * 1000; }
-          if (difficulty === 'hard') { shoutChance = 1.0; delay = 400 + Math.random() * 400; }
-
-          const timer = setTimeout(() => {
-            // AI has 80% chance to shout UNO
-            if (Math.random() < shoutChance) {
-              shoutUNO(pendingUNOPlayerId);
-            }
-          }, delay);
-          return () => clearTimeout(timer);
-        }
+      // If we detect a transition from not shouting to shouting, play sound
+      if (!wasShouting && isShouting) {
+        playSound('uno');
       }
 
-      const pendingPlayerIndex = gameState.pendingWildColorPlayerIndex;
-      if (pendingPlayerIndex !== null) {
-        const player = gameState.players[pendingPlayerIndex];
-        if (!player.isLocal) {
-          const difficulty = player.difficulty || 'medium';
-          const delay = difficulty === 'hard' ? 500 : 1000;
-
-          const timer = setTimeout(() => {
-            const colors: CardColor[] = ['red', 'blue', 'green', 'yellow'];
-            const counts = colors.map(c => player.hand.filter(card => card.color === c).length);
-            const maxIndex = counts.indexOf(Math.max(...counts));
-            chooseColor(colors[maxIndex]);
-          }, delay);
-          return () => clearTimeout(timer);
-        }
-        return;
-      }
-
-      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-      if (!currentPlayer.isLocal) {
-        const difficulty = currentPlayer.difficulty || 'medium';
-
-        let delay = 800;
-        if (difficulty === 'easy') delay = 1500 + Math.random() * 1000;
-        if (difficulty === 'medium') delay = 500 + Math.random() * 400;
-        if (difficulty === 'hard') delay = 50 + Math.random() * 100; // Super fast for Nightmare
-
-        const timer = setTimeout(() => {
-          const topCard = gameState.discardPile[gameState.discardPile.length - 1];
-          const drawStack = gameState.drawStack;
-          const currentWildColor = gameState.currentWildColor;
-
-          let playableCard: CardData | undefined;
-          const playableCards = currentPlayer.hand.filter(c => canPlayCard(c, topCard, drawStack, currentWildColor, lastNumberValue));
-
-          if (difficulty === 'hard' && playableCards.length > 0) {
-            // Hard AI Strategy - Be Meaner
-            const otherPlayers = gameState.players.filter(p => p.id !== currentPlayer.id);
-            const nearWinner = otherPlayers.find(p => p.hand.length <= 2);
-
-            // 1. If someone is about to win, try to punish/stop them
-            if (nearWinner) {
-              playableCard = playableCards.find(c => ['draw4', 'draw2', 'skip', 'reverse'].includes(c.value));
-            }
-
-            // 2. Try to save wild cards for last
-            if (!playableCard) {
-              // Priority: Number cards that match the color we have MOST of
-              const colorCounts: Record<string, number> = { red: 0, blue: 0, green: 0, yellow: 0 };
-              currentPlayer.hand.forEach(c => { if (c.color !== 'wild') colorCounts[c.color as keyof typeof colorCounts]++ });
-              const bestColor = Object.entries(colorCounts).sort((a, b) => b[1] - a[1])[0][0];
-
-              playableCard = playableCards.find(c => c.color === bestColor && !['draw4', 'wild'].includes(c.value));
-            }
-
-            // 3. Just play anything that isn't a powerful wild card if possible
-            if (!playableCard) {
-              playableCard = playableCards.find(c => !['draw4', 'wild'].includes(c.value));
-            }
-
-            if (!playableCard) playableCard = playableCards[0];
-          } else {
-            playableCard = playableCards[0];
-          }
-
-          if (playableCard) {
-            playCard(gameState.currentPlayerIndex, playableCard.id);
-          } else {
-            drawCard(gameState.currentPlayerIndex);
-          }
-        }, delay);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [gameState.currentPlayerIndex, gameState.status, gameState.pendingWildColorPlayerIndex, gameState.pendingUNOPlayerId, gameState.isReverseActive, gameState.jumpInPlayerId, isHost]);
+      prevUnoDB.current[p.id] = isShouting;
+    });
+  }, [gameState.players, gameState.status]);
 
   // Turn Notification
   useEffect(() => {
@@ -593,50 +506,6 @@ export default function App() {
       }
     }
   };
-
-  // AI Jump-in logic
-  useEffect(() => {
-    if (gameState.status === 'playing' && gameState.pendingWildColorPlayerIndex === null) {
-      // Don't jump in during overlay animations
-      if (gameState.isReverseActive || gameState.jumpInPlayerId) return;
-      const topCard = gameState.discardPile[gameState.discardPile.length - 1];
-      const drawStack = gameState.drawStack;
-
-      // Find AI players who can jump in
-      const jumpInOpportunities: { playerIndex: number, cardId: string, difficulty: Difficulty }[] = [];
-
-      gameState.players.forEach((player, idx) => {
-        // AI can jump in if it's not their turn and they have a matching card
-        if (!player.isLocal && idx !== gameState.currentPlayerIndex) {
-          player.hand.forEach(card => {
-            if (canJumpIn(card, topCard, drawStack)) {
-              jumpInOpportunities.push({ playerIndex: idx, cardId: card.id, difficulty: player.difficulty || 'medium' });
-            }
-          });
-        }
-      });
-
-      if (jumpInOpportunities.length > 0) {
-        // Random AI jumps in after a delay
-        const opportunity = jumpInOpportunities[Math.floor(Math.random() * jumpInOpportunities.length)];
-
-        let jumpChance = 0.5;
-        let delay = 1000 + Math.random() * 1000;
-
-        if (opportunity.difficulty === 'easy') { jumpChance = 0.15; delay = 3000 + Math.random() * 2000; }
-        if (opportunity.difficulty === 'medium') { jumpChance = 0.45; delay = 600 + Math.random() * 1000; }
-        if (opportunity.difficulty === 'hard') { jumpChance = 0.95; delay = 100 + Math.random() * 250; }
-
-        const timer = setTimeout(() => {
-          if (Math.random() < jumpChance) {
-            // Already handled in discardPile watcher once card hit table
-            playCard(opportunity.playerIndex, opportunity.cardId);
-          }
-        }, delay);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [gameState.discardPile, gameState.status, gameState.pendingWildColorPlayerIndex, gameState.isReverseActive, gameState.jumpInPlayerId]);
 
   const renderLobby = () => {
     const isHost = gameState.players.length > 0 && gameState.players[0].isLocal;
@@ -973,6 +842,10 @@ export default function App() {
     const isAnimating = gameState.isReverseActive || !!gameState.jumpInPlayerId;
     const isLocalPendingUno = gameState.pendingUNOPlayerId !== null && gameState.pendingUNOPlayerId === localPlayer.id;
     const canSwitchView = isSpectator || gameState.isDevMode;
+    const hasPlayableCard = localPlayer.hand.some(card =>
+      (isLocalTurn && !isPendingColor && canPlayCard(card, topCard, gameState.drawStack, gameState.currentWildColor, lastNumberValue)) ||
+      (!isLocalTurn && !isPendingColor && canJumpIn(card, topCard, gameState.drawStack))
+    );
 
     return (
       <motion.div
@@ -1253,7 +1126,9 @@ export default function App() {
                       setGameState(p => {
                         const players = [...p.players];
                         const randomCard = createDeck()[0];
-                        players[p.currentPlayerIndex].hand.push(randomCard);
+                        if (players[p.currentPlayerIndex]) {
+                          players[p.currentPlayerIndex].hand.push(randomCard);
+                        }
                         return { ...p, players };
                       });
                       playSound('draw');
@@ -1751,7 +1626,7 @@ export default function App() {
               <div className={cn("w-2 h-2 rounded-full", isTargetTurn ? "bg-emerald-400 animate-ping" : "bg-zinc-700")} />
               <div className="flex flex-col items-start -space-y-1">
                 <span className="text-xs font-black uppercase tracking-widest">
-                  {isTargetTurn ? (isShowingActualSelf ? "你的回合" : `${displayedPlayer?.name} 的回合`) : `${gameState.players[gameState.currentPlayerIndex].name} 的回合`}
+                  {isTargetTurn ? (isShowingActualSelf ? "你的回合" : `${displayedPlayer?.name} 的回合`) : `${gameState.players[gameState.currentPlayerIndex]?.name || '未知'} 的回合`}
                 </span>
               </div>
               {isTargetTurn && (
@@ -1766,15 +1641,17 @@ export default function App() {
             </div>
 
             {/* Recommendation Toggle */}
-            <button
-              onClick={() => setShowRecommendations(!showRecommendations)}
-              className={cn(
-                "px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all border",
-                showRecommendations ? "bg-white text-black border-white" : "bg-zinc-900 text-white border-white/10 hover:border-white/30"
-              )}
-            >
-              推荐出牌
-            </button>
+            {hasPlayableCard && (
+              <button
+                onClick={() => setShowRecommendations(!showRecommendations)}
+                className={cn(
+                  "px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all border",
+                  showRecommendations ? "bg-white text-black border-white" : "bg-zinc-900 text-white border-white/10 hover:border-white/30"
+                )}
+              >
+                推荐出牌
+              </button>
+            )}
 
             {/* Action Buttons */}
             <AnimatePresence mode="wait">

@@ -85,7 +85,10 @@ func CanPlayCard(card CardData, topCard CardData, drawStack int, currentWildColo
 		return true
 	}
 
-	return card.Color == effectiveColor || card.Value == topCard.Value
+	matchesCurrent := card.Color == effectiveColor || card.Value == topCard.Value
+	matchesLastNumber := lastNumberValue != "" && card.Value == lastNumberValue
+
+	return matchesCurrent || matchesLastNumber
 }
 
 func CanJumpIn(card CardData, topCard CardData) bool {

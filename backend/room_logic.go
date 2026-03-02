@@ -68,6 +68,7 @@ func (r *Room) StartGame() {
 	}
 
 	go r.StartTimer()
+	r.CheckAI()
 }
 
 func (r *Room) StartTimer() {
@@ -217,6 +218,26 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 	r.State.DrawStack = newDrawStack
 	r.State.IsReverseActive = card.Value == Reverse
 
+	if r.State.IsReverseActive {
+		time.AfterFunc(1500*time.Millisecond, func() {
+			r.Mutex.Lock()
+			r.State.IsReverseActive = false
+			r.Mutex.Unlock()
+			r.UpdateState()
+			r.CheckAI()
+		})
+	}
+	if isJumpIn {
+		r.State.JumpInPlayerID = player.ID
+		time.AfterFunc(2*time.Second, func() {
+			r.Mutex.Lock()
+			r.State.JumpInPlayerID = ""
+			r.Mutex.Unlock()
+			r.UpdateState()
+			r.CheckAI()
+		})
+	}
+
 	if card.Color == Wild || card.Value == Draw4 {
 		r.State.PendingWildColorPlayerIndex = &playerIndex
 		r.State.CurrentPlayerIndex = playerIndex
@@ -224,22 +245,6 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 	} else {
 		r.State.CurrentPlayerIndex = nextPlayerIndex
 		r.State.TimeLeft = 30
-		r.State.CurrentWildColor = ""
-		r.State.PendingWildColorPlayerIndex = nil
-	}
-
-	if r.State.IsReverseActive {
-		time.AfterFunc(1500*time.Millisecond, func() {
-			r.Mutex.Lock()
-			r.State.IsReverseActive = false
-			r.Mutex.Unlock()
-			r.UpdateState()
-		})
-	}
-
-	if card.Color == Wild || card.Value == Draw4 {
-		r.State.PendingWildColorPlayerIndex = &playerIndex
-	} else {
 		r.State.CurrentWildColor = ""
 		r.State.PendingWildColorPlayerIndex = nil
 	}
@@ -258,15 +263,7 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 		})
 	}
 
-	if isJumpIn {
-		r.State.JumpInPlayerID = player.ID
-		time.AfterFunc(2*time.Second, func() {
-			r.Mutex.Lock()
-			r.State.JumpInPlayerID = ""
-			r.Mutex.Unlock()
-			r.UpdateState()
-		})
-	}
+	r.CheckAI()
 }
 
 func (r *Room) DrawCard(playerID string) {
@@ -292,6 +289,7 @@ func (r *Room) DrawCard(playerID string) {
 	r.State.DrawStack = 0
 	r.State.CurrentPlayerIndex = (r.State.CurrentPlayerIndex + r.State.Direction + len(r.State.Players)) % len(r.State.Players)
 	r.State.TimeLeft = 30
+	r.CheckAI()
 }
 
 func (r *Room) DrawPenalty(playerID string, count int) {
@@ -360,6 +358,7 @@ func (r *Room) ChooseColor(playerID string, color CardColor) {
 	nextPlayerIndex := (r.State.CurrentPlayerIndex + r.State.Direction + len(r.State.Players)) % len(r.State.Players)
 	r.State.CurrentPlayerIndex = nextPlayerIndex
 	r.State.TimeLeft = 30
+	r.CheckAI()
 }
 
 func (r *Room) UpdateAISettings(playerID string, aiCount int, difficulty Difficulty) {
@@ -462,6 +461,179 @@ func (r *Room) RemovePlayer(playerID string) {
 }
 
 
+func (r *Room) CheckAI() {
+	if r.State.Status != Playing {
+		return
+	}
+
+	// 1. Handle Pending UNO Shout
+	if r.State.PendingUnoPlayerID != "" {
+		pIdx := -1
+		for i, p := range r.State.Players {
+			if p.ID == r.State.PendingUnoPlayerID { pIdx = i; break }
+		}
+		if pIdx != -1 && !startsWith(r.State.Players[pIdx].ID, "ai-") {
+			// Real player, we don't act for them
+		} else if pIdx != -1 {
+			// Bot needs to shout UNO
+			diff := r.State.Players[pIdx].Difficulty
+			if diff == "" { diff = Medium }
+			
+			delay := 1000 + rand.Intn(1000)
+			if diff == Easy { delay = 1500 + rand.Intn(1000) }
+			if diff == Hard { delay = 400 + rand.Intn(400) }
+			
+			pID := r.State.PendingUnoPlayerID
+			time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
+				r.Mutex.Lock()
+				defer r.Mutex.Unlock()
+				if r.State.PendingUnoPlayerID == pID {
+					// 80% chance to shout UNO
+					if rand.Float32() < 0.8 {
+						r.ShoutUno(pID)
+						r.UpdateState()
+					}
+				}
+			})
+			return
+		}
+	}
+
+	// 2. Handle Choosing Color
+	if r.State.PendingWildColorPlayerIndex != nil {
+		pIdx := *r.State.PendingWildColorPlayerIndex
+		if pIdx >= 0 && pIdx < len(r.State.Players) {
+			player := &r.State.Players[pIdx]
+			if !startsWith(player.ID, "ai-") { return }
+			
+			diff := player.Difficulty
+			if diff == "" { diff = Medium }
+			delay := 1000
+			if diff == Hard { delay = 500 }
+			
+			pID := player.ID
+			time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
+				r.Mutex.Lock()
+				defer r.Mutex.Unlock()
+				if r.State.PendingWildColorPlayerIndex != nil && r.State.Players[*r.State.PendingWildColorPlayerIndex].ID == pID {
+					colors := []CardColor{Red, Blue, Green, Yellow}
+					counts := make([]int, 4)
+					for _, c := range r.State.Players[*r.State.PendingWildColorPlayerIndex].Hand {
+						for i, col := range colors {
+							if c.Color == col { counts[i]++; break }
+						}
+					}
+					maxIdx := 0
+					for i, count := range counts {
+						if count > counts[maxIdx] { maxIdx = i }
+					}
+					r.ChooseColor(pID, colors[maxIdx])
+					r.UpdateState()
+				}
+			})
+			return
+		}
+	}
+
+	// 3. Normal Turn
+	if r.State.CurrentPlayerIndex < 0 || r.State.CurrentPlayerIndex >= len(r.State.Players) {
+		return
+	}
+	player := &r.State.Players[r.State.CurrentPlayerIndex]
+	if !startsWith(player.ID, "ai-") {
+		return
+	}
+
+	// Block AI if animation is playing
+	if r.State.IsReverseActive || r.State.JumpInPlayerID != "" {
+		return
+	}
+
+	diff := player.Difficulty
+	if diff == "" { diff = Medium }
+	
+	delay := 800
+	if diff == Easy { delay = 1500 + rand.Intn(1000) }
+	if diff == Medium { delay = 500 + rand.Intn(400) }
+	if diff == Hard { delay = 50 + rand.Intn(100) }
+
+	pID := player.ID
+	time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
+		r.Mutex.Lock()
+		defer r.Mutex.Unlock()
+		
+		if r.State.Status != Playing || r.State.Players[r.State.CurrentPlayerIndex].ID != pID {
+			return
+		}
+		if r.State.IsReverseActive || r.State.JumpInPlayerID != "" || r.State.PendingWildColorPlayerIndex != nil {
+			// Reschedule? Actually CheckAI will be called when these finish
+			return
+		}
+
+		topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
+		lastNum := GetLastNumberValue(r.State.DiscardPile)
+		
+		var playableCardID string
+		playableCards := []CardData{}
+		for _, card := range r.State.Players[r.State.CurrentPlayerIndex].Hand {
+			if CanPlayCard(card, topCard, r.State.DrawStack, r.State.CurrentWildColor, lastNum) {
+				playableCards = append(playableCards, card)
+			}
+		}
+
+		if len(playableCards) > 0 {
+			if diff == Hard {
+				// Strat: punishment
+				hasNearWinner := false
+				for i, p := range r.State.Players {
+					if i != r.State.CurrentPlayerIndex && len(p.Hand) <= 2 {
+						hasNearWinner = true
+						break
+					}
+				}
+				
+				if hasNearWinner {
+					// Try to play action cards
+					for _, c := range playableCards {
+						if c.Value == Draw4 || c.Value == Draw2 || c.Value == Skip || c.Value == Reverse {
+							playableCardID = c.ID
+							break
+						}
+					}
+				}
+				
+				if playableCardID == "" {
+					// Priority: match most common color
+					colorCounts := map[CardColor]int{Red: 0, Blue: 0, Green: 0, Yellow: 0}
+					for _, c := range r.State.Players[r.State.CurrentPlayerIndex].Hand {
+						if c.Color != Wild { colorCounts[c.Color]++ }
+					}
+					var bestColor CardColor
+					maxC := -1
+					for col, count := range colorCounts {
+						if count > maxC { maxC = count; bestColor = col }
+					}
+					for _, c := range playableCards {
+						if c.Color == bestColor && c.Value != WildCard && c.Value != Draw4 {
+							playableCardID = c.ID
+							break
+						}
+					}
+				}
+			}
+			if playableCardID == "" {
+				playableCardID = playableCards[0].ID
+			}
+			r.PlayCardInternal(pID, playableCardID)
+		} else {
+			r.DrawCard(pID)
+		}
+		r.UpdateState()
+	})
+}
+
+
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[0:len(prefix)] == prefix
 }
+
