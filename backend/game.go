@@ -75,7 +75,7 @@ func CanPlayCard(card CardData, topCard CardData, drawStack int, currentWildColo
 			return true
 		}
 		// Royale rules
-		if card.Color == effectiveColor && (card.Value == Reverse || card.Value == Skip) {
+		if (card.Value == Reverse || card.Value == Skip) && (card.Color == effectiveColor || card.Value == topCard.Value) {
 			return true
 		}
 		return false
@@ -85,10 +85,7 @@ func CanPlayCard(card CardData, topCard CardData, drawStack int, currentWildColo
 		return true
 	}
 
-	matchesCurrent := card.Color == effectiveColor || card.Value == topCard.Value
-	matchesLastNumber := lastNumberValue != "" && card.Value == lastNumberValue
-
-	return matchesCurrent || matchesLastNumber
+	return card.Color == effectiveColor || card.Value == topCard.Value
 }
 
 func CanJumpIn(card CardData, topCard CardData) bool {

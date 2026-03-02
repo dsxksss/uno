@@ -96,6 +96,37 @@ func (r *Room) UpdateState() {
 	r.Broadcast <- fullMsg
 }
 
+func (r *Room) cleanupIfAbandoned() {
+	r.Mutex.Lock()
+	defer r.Mutex.Unlock()
+
+	hasHuman := false
+	for _, p := range r.State.Players {
+		if p.IsLocal {
+			hasHuman = true
+			break
+		}
+	}
+	if !hasHuman {
+		for _, p := range r.State.Spectators {
+			if p.IsLocal {
+				hasHuman = true
+				break
+			}
+		}
+	}
+
+	if !hasHuman {
+		roomsMutex.Lock()
+		if _, exists := rooms[r.Code]; exists {
+			delete(rooms, r.Code)
+			log.Printf("Room %s closed: no human players left\n", r.Code)
+			r.State.Status = Ended
+		}
+		roomsMutex.Unlock()
+	}
+}
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -126,6 +157,7 @@ func (c *Client) readPump() {
 			delete(c.Room.Clients, c.ID)
 			c.Room.Mutex.Unlock()
 			c.Room.UpdateState()
+			c.Room.cleanupIfAbandoned()
 		}
 		c.Conn.Close()
 	}()
@@ -252,12 +284,24 @@ func (c *Client) handleMessage(msg Message) {
 		
 		c.Room = room
 		room.Clients[c.ID] = c
-		room.State.Players = append(room.State.Players, Player{
-			ID:      c.ID,
-			Name:    payload.PlayerName,
-			Hand:    []CardData{},
-			IsLocal: true,
-		})
+		
+		isSpectator := room.State.Status != Lobby || len(room.State.Players) >= 10
+		
+		if isSpectator {
+			room.State.Spectators = append(room.State.Spectators, Player{
+				ID:      c.ID,
+				Name:    payload.PlayerName,
+				Hand:    []CardData{},
+				IsLocal: true,
+			})
+		} else {
+			room.State.Players = append(room.State.Players, Player{
+				ID:      c.ID,
+				Name:    payload.PlayerName,
+				Hand:    []CardData{},
+				IsLocal: true,
+			})
+		}
 		room.Mutex.Unlock()
 		
 		room.UpdateState()
@@ -292,13 +336,14 @@ func (c *Client) handleMessage(msg Message) {
 		delete(c.Room.Clients, c.ID)
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
+		c.Room.cleanupIfAbandoned()
 		c.Room = nil
 
 	case "GET_ROOM_LIST":
 		roomsMutex.Lock()
 		activeRooms := []map[string]interface{}{}
 		for _, r := range rooms {
-			if r.State.Status == Lobby && len(r.State.Players) > 0 {
+			if len(r.State.Players) > 0 {
 				hostName := "未知"
 				if len(r.State.Players) > 0 {
 					hostName = r.State.Players[0].Name
@@ -307,6 +352,7 @@ func (c *Client) handleMessage(msg Message) {
 					"code":        r.Code,
 					"playerCount": len(r.State.Players),
 					"hostName":    hostName,
+					"status":      r.State.Status,
 				})
 			}
 		}

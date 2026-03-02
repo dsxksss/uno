@@ -77,6 +77,7 @@ type GameState struct {
 	PendingWildColorPlayerIndex *int       `json:"pendingWildColorPlayerIndex"`
 	PendingUnoPlayerID          string     `json:"pendingUNOPlayerId"`
 	JumpInPlayerID              string     `json:"jumpInPlayerId"`
+	Spectators                  []Player   `json:"spectators"`
 	IsReverseActive             bool       `json:"isReverseActive"`
 	IsDevMode                   bool       `json:"isDevMode"`
 	PlayerLeftMessage           string     `json:"playerLeftMessage,omitempty"`

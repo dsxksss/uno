@@ -87,6 +87,7 @@ export default function App() {
     pendingWildColorPlayerIndex: null,
     pendingUNOPlayerId: null,
     jumpInPlayerId: null,
+    spectators: [],
     isReverseActive: false,
     isDevMode: false,
   });
@@ -109,10 +110,20 @@ export default function App() {
   const [activeRooms, setActiveRooms] = useState<{ code: string, playerCount: number }[]>([]);
   const [showRoomHall, setShowRoomHall] = useState(false);
   const [copied, setCopied] = useState(false);
+  const lastPlayedCardIdRef = useRef<string | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const prevTimeLeftRef = useRef<number>(30);
   const socketRef = useRef<WebSocket | null>(null);
   const clientIdRef = useRef<string | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
+  const [ripples, setRipples] = useState<{ id: string, color: string, x: number, y: number, scale: number, thickness: number }[]>([]);
+  const [actionBubble, setActionBubble] = useState<{ text: string, color: string } | null>(null);
+  const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
   const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
+  const isSpectator = gameState.spectators.some(s => s.isLocal);
+  const me = [...gameState.players, ...gameState.spectators].find(p => p.isLocal);
+  const isHost = gameState.players[0]?.isLocal;
+  const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
 
   useEffect(() => {
     const socket = new WebSocket(`ws://${window.location.host}/ws`);
@@ -133,6 +144,12 @@ export default function App() {
             ...p,
             isLocal: p.id === clientIdRef.current
           }));
+          newState.spectators = (newState.spectators || []).map((p: any) => ({
+            ...p,
+            isLocal: p.id === clientIdRef.current
+          }));
+
+          setViewingPlayerId(v => v || clientIdRef.current);
         }
 
         setGameState(newState);
@@ -159,10 +176,78 @@ export default function App() {
   }, [isMuted]);
 
   // Trigger screen shake
-  const triggerShake = useCallback(() => {
+  const triggerShake = useCallback((intensity: number = 1) => {
     setShake(true);
-    setTimeout(() => setShake(false), 300);
+    // Adjust shake intensity based on card power
+    setTimeout(() => setShake(false), 200 + (intensity * 100));
   }, []);
+
+  const triggerRipple = useCallback((color: string, value: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+
+    // Determine power levels
+    const isSpecial = ['draw2', 'draw4', 'skip', 'reverse', 'wild'].includes(value);
+    const isUltra = ['draw4', 'wild'].includes(value);
+    const isDraw2 = value === 'draw2';
+
+    let particleCount = 40;
+    let rippleScale = 3.5;
+    let rippleThickness = 4;
+    let shakeIntensity = 0.5;
+
+    if (isUltra) {
+      particleCount = 250;
+      rippleScale = 8;
+      rippleThickness = 12;
+      shakeIntensity = 2.5;
+      setActionBubble({ text: value === 'draw4' ? '+4 !!!' : 'WILD !', color: 'yellow' });
+    } else if (isDraw2) {
+      particleCount = 150;
+      rippleScale = 5.5;
+      rippleThickness = 8;
+      shakeIntensity = 1.8;
+      setActionBubble({ text: '+2 !!', color: 'white' });
+    } else if (isSpecial) {
+      particleCount = 100;
+      rippleScale = 4.5;
+      rippleThickness = 6;
+      shakeIntensity = 1.2;
+      setActionBubble({ text: value.toUpperCase() + ' !', color: 'white' });
+    }
+
+    setRipples(prev => [...prev, { id, color, x: 50, y: 45, scale: rippleScale, thickness: rippleThickness }]);
+    triggerShake(shakeIntensity);
+
+    setTimeout(() => {
+      setRipples(prev => prev.filter(r => r.id !== id));
+    }, 2500);
+
+    if (isSpecial) {
+      setTimeout(() => setActionBubble(null), 1200);
+    }
+
+    // Enhanced Particle effect
+    const colors = {
+      'red': '#ef4444',
+      'blue': '#3b82f6',
+      'green': '#10b981',
+      'yellow': '#fbbf24',
+      'wild': '#ffffff'
+    };
+    const particleColor = colors[color as keyof typeof colors] || '#ffffff';
+
+    confetti({
+      particleCount: particleCount,
+      spread: 70 + (shakeIntensity * 20),
+      origin: { x: 0.5, y: 0.45 },
+      colors: [particleColor, '#ffffff'],
+      scalar: 0.6 + (shakeIntensity * 0.2),
+      gravity: 1.0 + (shakeIntensity * 0.2),
+      ticks: 150,
+      shapes: ['circle'],
+      startVelocity: 35 + (shakeIntensity * 10)
+    });
+  }, [triggerShake]);
 
   const createRoom = () => {
     if (!playerName || !socketRef.current) return;
@@ -288,6 +373,7 @@ export default function App() {
       type: 'CHOOSE_COLOR',
       payload: { color }
     }));
+    playSound('color');
   };
 
   const shoutUNO = (playerId: string) => {
@@ -296,7 +382,38 @@ export default function App() {
     playSound('uno');
   };
 
-  // Sound effects based on state changes
+  // Countdown sound control
+  useEffect(() => {
+    if (gameState.status !== 'playing') {
+      if (countdownTimerRef.current) clearTimeout(countdownTimerRef.current);
+      sounds.countdown.stop();
+      return;
+    }
+
+    const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal;
+
+    // Stop sound if turn changed, time reset, or game ended
+    if (!isLocalTurn || gameState.timeLeft > 4 || gameState.timeLeft <= 0) {
+      if (countdownTimerRef.current) clearTimeout(countdownTimerRef.current);
+      sounds.countdown.stop();
+    }
+
+    // Play sound 0.5s earlier: when 4 switches to 3, OR if it's 3 and we missed the switch
+    // Actually, trigger at 4 with a 500ms delay to hit 3.5s
+    if (isLocalTurn && !isMuted && !sounds.countdown.playing()) {
+      if (gameState.timeLeft === 4 && prevTimeLeftRef.current > 4) {
+        countdownTimerRef.current = setTimeout(() => {
+          if (gameState.timeLeft <= 4 && !isMuted) sounds.countdown.play();
+        }, 500);
+      } else if (gameState.timeLeft === 3 && prevTimeLeftRef.current > 3 && !countdownTimerRef.current) {
+        // Fallback for network lag
+        sounds.countdown.play();
+      }
+    }
+
+    prevTimeLeftRef.current = gameState.timeLeft;
+  }, [gameState.timeLeft, gameState.currentPlayerIndex, gameState.status, isMuted]);
+
   useEffect(() => {
     if (gameState.status !== 'playing') return;
     const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal;
@@ -306,18 +423,38 @@ export default function App() {
   }, [gameState.currentPlayerIndex]);
 
   useEffect(() => {
-    if (gameState.discardPile.length > 1) {
-      const card = gameState.discardPile[gameState.discardPile.length - 1];
-      const isActionCard = ['draw2', 'draw4', 'skip', 'reverse'].includes(card.value);
-      playSound(isActionCard ? 'item' : (Math.random() > 0.5 ? 'play1' : 'play2'));
-      if (card.value === 'skip') playSound('skip');
-      triggerShake();
+    if (gameState.status !== 'playing' || gameState.discardPile.length <= 1) return;
+
+    const topCard = gameState.discardPile[gameState.discardPile.length - 1];
+
+    // Only play sound if this is a NEW card we haven't handled yet
+    if (topCard.id !== lastPlayedCardIdRef.current) {
+      lastPlayedCardIdRef.current = topCard.id;
+
+      const isAction = !isNumberCard(topCard);
+      playSound(isAction ? 'item' : (Math.random() > 0.5 ? 'play1' : 'play2'));
+      if (topCard.value === 'skip') playSound('skip');
+
+      triggerRipple(topCard.color, topCard.value);
+      // Auto-clear selection when top card changes
+      setSelectedCardId(null);
     }
-  }, [gameState.discardPile.length]);
+  }, [gameState.discardPile, gameState.status, triggerRipple]); // Watch full discardPile change for IDs
+
+  // Monitor draw actions for sound
+  const prevTotalHandSize = useRef(0);
+  useEffect(() => {
+    const currentTotal = gameState.players.reduce((sum, p) => sum + p.hand.length, 0);
+    if (currentTotal > prevTotalHandSize.current && gameState.status === 'playing') {
+      playSound('draw');
+    }
+    prevTotalHandSize.current = currentTotal;
+  }, [gameState.players, gameState.status]);
 
   // Enhanced AI logic
   useEffect(() => {
-    if (gameState.status === 'playing') {
+    // Only the host handles AI logic to avoid conflicting/redundant network messages
+    if (gameState.status === 'playing' && isHost) {
       // Don't act if an overlay animation is playing
       if (gameState.isReverseActive || gameState.jumpInPlayerId) return;
       const pendingUNOPlayerId = gameState.pendingUNOPlayerId;
@@ -364,9 +501,10 @@ export default function App() {
       if (!currentPlayer.isLocal) {
         const difficulty = currentPlayer.difficulty || 'medium';
 
-        let delay = 1500;
-        if (difficulty === 'easy') delay = 3000 + Math.random() * 1500; // 3 - 4.5s delay for easy bot
-        if (difficulty === 'hard') delay = 500 + Math.random() * 300;
+        let delay = 800;
+        if (difficulty === 'easy') delay = 1500 + Math.random() * 1000;
+        if (difficulty === 'medium') delay = 500 + Math.random() * 400;
+        if (difficulty === 'hard') delay = 50 + Math.random() * 100; // Super fast for Nightmare
 
         const timer = setTimeout(() => {
           const topCard = gameState.discardPile[gameState.discardPile.length - 1];
@@ -377,16 +515,30 @@ export default function App() {
           const playableCards = currentPlayer.hand.filter(c => canPlayCard(c, topCard, drawStack, currentWildColor, lastNumberValue));
 
           if (difficulty === 'hard' && playableCards.length > 0) {
-            // Hard AI Strategy
+            // Hard AI Strategy - Be Meaner
             const otherPlayers = gameState.players.filter(p => p.id !== currentPlayer.id);
-            const nearWinner = otherPlayers.find(p => p.hand.length < 3);
+            const nearWinner = otherPlayers.find(p => p.hand.length <= 2);
 
+            // 1. If someone is about to win, try to punish/stop them
             if (nearWinner) {
               playableCard = playableCards.find(c => ['draw4', 'draw2', 'skip', 'reverse'].includes(c.value));
             }
+
+            // 2. Try to save wild cards for last
             if (!playableCard) {
-              playableCard = playableCards.find(c => !['draw4', 'draw2', 'skip', 'reverse', 'wild'].includes(c.value));
+              // Priority: Number cards that match the color we have MOST of
+              const colorCounts: Record<string, number> = { red: 0, blue: 0, green: 0, yellow: 0 };
+              currentPlayer.hand.forEach(c => { if (c.color !== 'wild') colorCounts[c.color as keyof typeof colorCounts]++ });
+              const bestColor = Object.entries(colorCounts).sort((a, b) => b[1] - a[1])[0][0];
+
+              playableCard = playableCards.find(c => c.color === bestColor && !['draw4', 'wild'].includes(c.value));
             }
+
+            // 3. Just play anything that isn't a powerful wild card if possible
+            if (!playableCard) {
+              playableCard = playableCards.find(c => !['draw4', 'wild'].includes(c.value));
+            }
+
             if (!playableCard) playableCard = playableCards[0];
           } else {
             playableCard = playableCards[0];
@@ -401,15 +553,14 @@ export default function App() {
         return () => clearTimeout(timer);
       }
     }
-  }, [gameState.currentPlayerIndex, gameState.status, gameState.pendingWildColorPlayerIndex, gameState.pendingUNOPlayerId, gameState.isReverseActive, gameState.jumpInPlayerId]);
+  }, [gameState.currentPlayerIndex, gameState.status, gameState.pendingWildColorPlayerIndex, gameState.pendingUNOPlayerId, gameState.isReverseActive, gameState.jumpInPlayerId, isHost]);
 
   // Turn Notification
   useEffect(() => {
     if (gameState.status === 'playing') {
+      playSound('turn');
       const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal;
-      if (isLocalTurn) {
-        playSound('turn');
-      } else {
+      if (!isLocalTurn) {
         setSelectedCardId(null);
       }
     }
@@ -469,15 +620,16 @@ export default function App() {
         // Random AI jumps in after a delay
         const opportunity = jumpInOpportunities[Math.floor(Math.random() * jumpInOpportunities.length)];
 
-        let jumpChance = 0.4;
+        let jumpChance = 0.5;
         let delay = 1000 + Math.random() * 1000;
 
-        if (opportunity.difficulty === 'easy') { jumpChance = 0.1; delay = 3500 + Math.random() * 1500; }
-        if (opportunity.difficulty === 'hard') { jumpChance = 0.9; delay = 400 + Math.random() * 400; }
+        if (opportunity.difficulty === 'easy') { jumpChance = 0.15; delay = 3000 + Math.random() * 2000; }
+        if (opportunity.difficulty === 'medium') { jumpChance = 0.45; delay = 600 + Math.random() * 1000; }
+        if (opportunity.difficulty === 'hard') { jumpChance = 0.95; delay = 100 + Math.random() * 250; }
 
         const timer = setTimeout(() => {
           if (Math.random() < jumpChance) {
-            playSound('jump');
+            // Already handled in discardPile watcher once card hit table
             playCard(opportunity.playerIndex, opportunity.cardId);
           }
         }, delay);
@@ -502,7 +654,13 @@ export default function App() {
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               className="relative"
             >
-              <svg width="360" height="240" viewBox="0 0 140 100" className="fill-white stroke-black stroke-[4px] drop-shadow-[0_30px_60px_rgba(0,0,0,0.5)]">
+              <svg
+                width="360"
+                height="240"
+                viewBox="0 0 140 100"
+                className="fill-white stroke-black stroke-[4px] drop-shadow-[0_30px_60px_rgba(0,0,0,0.5)] transition-all"
+                style={{ transform: `scale(var(--ui-scale))` }}
+              >
                 <path d="M20,50 L10,30 L40,25 L50,5 L80,20 L110,5 L125,30 L150,45 L130,70 L140,95 L100,80 L70,100 L50,80 L20,95 L30,70 L10,65 Z" />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center -mt-4">
@@ -548,7 +706,10 @@ export default function App() {
           </div>
         </motion.div>
 
-        <div className="w-full max-w-md space-y-6 bg-zinc-900/50 p-8 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl">
+        <div
+          className="w-full max-w-lg space-y-4 bg-zinc-900/50 p-6 sm:p-8 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl transition-all"
+          style={{ transform: 'scale(var(--ui-scale))' }}
+        >
           {!gameState.roomCode ? (
             <>
               <div className="flex flex-col items-center justify-center py-4">
@@ -731,6 +892,32 @@ export default function App() {
                       </div>
                     </motion.div>
                   ))}
+                  {gameState.spectators.map((p) => (
+                    <motion.div
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      key={p.id}
+                      className="flex items-center justify-between bg-zinc-900/40 p-3 rounded-xl border border-dashed border-white/10"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 font-bold">{p.name}</span>
+                        {p.isLocal && <span className="text-[10px] text-zinc-500 font-bold">(你)</span>}
+                        <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">观战中</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Only host can kick others */}
+                        {gameState.players[0]?.isLocal && (
+                          <button
+                            onClick={() => kickPlayer(p.id)}
+                            className="p-1.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm"
+                            title="踢出观战者"
+                          >
+                            <LogOut size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
 
@@ -768,21 +955,33 @@ export default function App() {
   };
 
   const renderGame = () => {
-    const localPlayer = gameState.players.find(p => p.isLocal);
-    if (!localPlayer || gameState.players.length === 0) return null;
+    const localPlayer = [...gameState.players, ...gameState.spectators].find(p => p.isLocal);
+    if (!localPlayer || (gameState.status === 'playing' && gameState.players.length === 0)) return null;
+
+    const actualViewingId = viewingPlayerId || localPlayer.id;
+    const effectiveViewIndex = Math.max(0, gameState.players.findIndex(p => p.id === actualViewingId));
+    const displayedPlayer = gameState.players[effectiveViewIndex];
+    const isShowingActualSelf = displayedPlayer?.id === localPlayer.id;
 
     const isHost = gameState.players.length > 0 && gameState.players[0].isLocal;
     const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal ?? false;
+    const isTargetTurn = gameState.currentPlayerIndex === effectiveViewIndex;
     const topCard = gameState.discardPile[gameState.discardPile.length - 1];
     const currentWildColor = gameState.currentWildColor;
     const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
     const isLocalPendingColor = gameState.pendingWildColorPlayerIndex !== null && (gameState.players[gameState.pendingWildColorPlayerIndex]?.isLocal ?? false);
     const isAnimating = gameState.isReverseActive || !!gameState.jumpInPlayerId;
     const isLocalPendingUno = gameState.pendingUNOPlayerId !== null && gameState.pendingUNOPlayerId === localPlayer.id;
+    const canSwitchView = isSpectator || gameState.isDevMode;
 
     return (
       <motion.div
-        animate={shake ? { x: [-10, 10, -10, 10, 0], y: [-5, 5, -5, 5, 0] } : {}}
+        animate={shake ? {
+          x: [-15, 15, -12, 12, -8, 8, -4, 4, 0],
+          y: [-10, 10, -8, 8, -5, 5, -2, 2, 0],
+          scale: [1, 1.02, 0.99, 1.01, 1]
+        } : {}}
+        transition={{ duration: 0.4, ease: "easeInOut" }}
         className="relative min-h-screen bg-zinc-950 text-white overflow-hidden flex flex-col"
       >
         {/* Player Left Overlay */}
@@ -946,117 +1145,265 @@ export default function App() {
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10" />
         </div>
 
-        {/* Dev Command Center Overlay */}
-        {gameState.isDevMode && (
-          <div className="fixed bottom-12 right-12 z-[500] flex flex-col items-end gap-3 pointer-events-none">
-            <AnimatePresence>
-              {seeAllHands && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8, x: 20 }}
-                  animate={{ opacity: 1, scale: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, x: 20 }}
-                  className="bg-zinc-900/90 backdrop-blur-xl border border-white/20 p-4 rounded-2xl shadow-2xl pointer-events-auto"
-                >
-                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">手牌监测中</p>
-                  <div className="flex gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-[10px] uppercase font-bold text-white/50">上帝视角已启用</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="bg-zinc-900 border-2 border-emerald-500/50 p-2 rounded-2xl shadow-2xl flex items-center gap-2 pointer-events-auto backdrop-blur-md">
-              <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                <span className="text-[10px] font-black uppercase tracking-tighter text-emerald-500">DEV PANEL</span>
-              </div>
-
-              <button
-                onClick={() => setSeeAllHands(!seeAllHands)}
-                className={cn(
-                  "p-2 rounded-xl transition-all active:scale-90",
-                  seeAllHands ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-500 hover:text-white"
-                )}
-                title="上帝视角 (查看所有手牌)"
-              >
-                <RefreshCw size={18} className={seeAllHands ? "animate-spin-slow" : ""} />
-              </button>
-
-              <button
-                onClick={forceWin}
-                className="p-2 bg-yellow-400 text-black rounded-xl hover:scale-110 active:scale-95 transition-all shadow-lg"
-                title="瞬间获胜"
-              >
-                <Trophy size={18} fill="currentColor" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setGameState(p => {
-                    const players = [...p.players];
-                    const randomCard = createDeck()[0];
-                    players[p.currentPlayerIndex].hand.push(randomCard);
-                    return { ...p, players };
-                  });
-                  playSound('draw');
+        {/* Water Ripples Layer */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-[0]">
+          <AnimatePresence>
+            {ripples.map(ripple => (
+              <motion.div
+                key={ripple.id}
+                initial={{ scale: 0, opacity: 1, border: `${ripple.thickness}px solid ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}` }}
+                animate={{ scale: ripple.scale, opacity: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 2.2, ease: "easeOut" }}
+                className="absolute rounded-full"
+                style={{
+                  left: `${ripple.x}%`,
+                  top: `${ripple.y}%`,
+                  width: '40vmax',
+                  height: '40vmax',
+                  marginLeft: '-20vmax',
+                  marginTop: '-20vmax',
+                  boxShadow: `0 0 50px ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}33`
                 }}
-                className="p-2 bg-white text-black rounded-xl hover:scale-110 active:scale-95 transition-all"
-                title="给当前玩家加牌"
+              />
+            ))}
+            {ripples.map(ripple => (
+              <motion.div
+                key={ripple.id + '-inner'}
+                initial={{ scale: 0, opacity: 0.6, border: `${ripple.thickness / 2}px solid ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}` }}
+                animate={{ scale: ripple.scale * 0.8, opacity: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 1.8, ease: "easeOut", delay: 0.15 }}
+                className="absolute rounded-full"
+                style={{
+                  left: `${ripple.x}%`,
+                  top: `${ripple.y}%`,
+                  width: '30vmax',
+                  height: '30vmax',
+                  marginLeft: '-15vmax',
+                  marginTop: '-15vmax',
+                }}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* Action Card Comic Bubbles (Center) */}
+        <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-[400] pointer-events-none flex items-center justify-center">
+          <AnimatePresence>
+            {actionBubble && (
+              <ComicBubble
+                text={actionBubble.text}
+                color={actionBubble.color}
+                className="relative top-0"
+              />
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Hand / Deck Controls - Hide for spectators */}
+        {!isSpectator && (
+          <div className="fixed bottom-0 left-0 right-0 flex flex-col items-center pb-8 pointer-events-none">
+            {/* Dev Command Center Overlay */}
+            {gameState.isDevMode && (
+              <div className="fixed bottom-12 right-12 z-[500] flex flex-col items-end gap-3 pointer-events-none">
+                <AnimatePresence>
+                  {seeAllHands && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                      animate={{ opacity: 1, scale: 1, x: 0 }}
+                      exit={{ opacity: 0, scale: 0.8, x: 20 }}
+                      className="bg-zinc-900/90 backdrop-blur-xl border border-white/20 p-4 rounded-2xl shadow-2xl pointer-events-auto"
+                    >
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">手牌监测中</p>
+                      <div className="flex gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-[10px] uppercase font-bold text-white/50">上帝视角已启用</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="bg-zinc-900 border-2 border-emerald-500/50 p-2 rounded-2xl shadow-2xl flex items-center gap-2 pointer-events-auto backdrop-blur-md">
+                  <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                    <span className="text-[10px] font-black uppercase tracking-tighter text-emerald-500">DEV PANEL</span>
+                  </div>
+
+                  <button
+                    onClick={() => setSeeAllHands(!seeAllHands)}
+                    className={cn(
+                      "p-2 rounded-xl transition-all active:scale-90",
+                      seeAllHands ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                    )}
+                    title="上帝视角 (查看所有手牌)"
+                  >
+                    <RefreshCw size={18} className={seeAllHands ? "animate-spin-slow" : ""} />
+                  </button>
+
+                  <button
+                    onClick={forceWin}
+                    className="p-2 bg-yellow-400 text-black rounded-xl hover:scale-110 active:scale-95 transition-all shadow-lg"
+                    title="瞬间获胜"
+                  >
+                    <Trophy size={18} fill="currentColor" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setGameState(p => {
+                        const players = [...p.players];
+                        const randomCard = createDeck()[0];
+                        players[p.currentPlayerIndex].hand.push(randomCard);
+                        return { ...p, players };
+                      });
+                      playSound('draw');
+                    }}
+                    className="p-2 bg-white text-black rounded-xl hover:scale-110 active:scale-95 transition-all"
+                    title="给当前玩家加牌"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+
+            {/* Bottom-Left Deck Counter */}
+            <div className="fixed bottom-12 left-12 z-[200] pointer-events-none drop-shadow-2xl">
+              <div
+                onClick={() => {
+                  if (isLocalTurn && !isAnimating && !isPendingColor) {
+                    drawCard(gameState.currentPlayerIndex);
+                    playSound('click');
+                  }
+                }}
+                className={cn(
+                  "relative group transition-all duration-500 pointer-events-auto cursor-pointer",
+                  !(isLocalTurn && !isAnimating && !isPendingColor) && "grayscale opacity-80 cursor-not-allowed"
+                )}
               >
-                <Plus size={18} />
-              </button>
+                {/* Stacked cards effect */}
+                <div className="absolute top-1 left-1 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-6 transition-transform group-hover:-translate-y-2" />
+                <div className="absolute top-0.5 left-0.5 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-3 transition-transform group-hover:-translate-y-1" />
+
+                <div className={cn(
+                  "relative w-[60px] h-[84px] bg-zinc-900 rounded-lg border-2 flex flex-col items-center justify-center gap-1 shadow-2xl backdrop-blur-sm transition-all group-hover:scale-110",
+                  isLocalTurn && !isAnimating && !isPendingColor ? "border-emerald-500 shadow-emerald-500/20" : "border-zinc-700"
+                )}>
+                  <Zap size={14} className={cn("text-emerald-500", isLocalTurn && "animate-pulse")} fill="currentColor" />
+                  <div className="flex flex-col items-center">
+                    <span className="text-xl font-black italic tracking-tighter text-white">{gameState.deck.length}</span>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500/70">DECK</span>
+                  </div>
+                </div>
+
+                {/* Glow effect */}
+                {isLocalTurn && !isAnimating && !isPendingColor && (
+                  <div className="absolute -inset-4 bg-emerald-500/20 rounded-full blur-2xl -z-10 animate-pulse" />
+                )}
+              </div>
             </div>
           </div>
         )}
 
-
-        {/* Bottom-Left Deck Counter */}
-        <div className="fixed bottom-12 left-12 z-[200] pointer-events-none drop-shadow-2xl">
-          <div className="relative group grayscale hover:grayscale-0 transition-all duration-500">
-            {/* Stacked cards effect */}
-            <div className="absolute top-1 left-1 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-6" />
-            <div className="absolute top-0.5 left-0.5 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-3" />
-
-            <div className="relative w-[60px] h-[84px] bg-zinc-900 rounded-lg border-2 border-emerald-500/50 flex flex-col items-center justify-center gap-1 shadow-2xl backdrop-blur-sm">
-              <Zap size={14} className="text-emerald-500 animate-pulse" fill="currentColor" />
-              <div className="flex flex-col items-center">
-                <span className="text-xl font-black italic tracking-tighter text-white">{gameState.deck.length}</span>
-                <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500/70">DECK</span>
-              </div>
-            </div>
-
-            {/* Glow effect */}
-            <div className="absolute -inset-4 bg-emerald-500/10 rounded-full blur-2xl -z-10" />
-          </div>
-        </div>
-
-        {/* Header / Stats */}
-        <div className="relative z-10 p-6 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <h1 className="text-xl font-black italic tracking-tighter">UNO ROYALE</h1>
-
-            <div className="flex items-center gap-4">
-              <div className="bg-zinc-900 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-3 shadow-lg">
-                <Users size={18} className="text-zinc-500" />
-                <div className="flex -space-x-2">
-                  {gameState.players.map((p, i) => (
-                    <div
+        <div className="relative z-10 p-6 flex items-center justify-between" style={{ transformOrigin: 'top left', transform: 'scale(var(--ui-scale))' }}>
+          <div className="flex items-center gap-3">
+            <motion.div
+              layout
+              className="bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1.5 rounded-2xl flex items-center gap-2 shadow-xl"
+            >
+              <AnimatePresence mode="popLayout">
+                {gameState.players.map((p, i) => {
+                  const isActive = gameState.currentPlayerIndex === i;
+                  return (
+                    <motion.div
                       key={p.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{
+                        opacity: 1,
+                        scale: 1,
+                        width: isActive ? "auto" : "36px"
+                      }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ type: "spring", damping: 20, stiffness: 300 }}
                       className={cn(
-                        "w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-black transition-all",
-                        gameState.currentPlayerIndex === i ? "border-emerald-500 bg-emerald-500 scale-125 z-10 shadow-[0_0_15px_rgba(16,185,129,0.5)]" : "border-zinc-800 bg-zinc-900 text-zinc-500"
+                        "h-9 rounded-xl flex items-center transition-all duration-300 border overflow-hidden",
+                        isActive
+                          ? "bg-emerald-500 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.4)] px-4 gap-2"
+                          : "bg-zinc-800/50 border-white/5 text-zinc-500 justify-center hover:bg-zinc-800 hover:text-zinc-300 cursor-help"
                       )}
+                      title={!isActive ? `${p.name} (${p.hand.length}张)` : ""}
                     >
-                      {p.name[0]}
-                    </div>
-                  ))}
-                </div>
+                      <div className={cn(
+                        "w-2 h-2 rounded-full flex-shrink-0",
+                        isActive ? "bg-white animate-pulse" : "bg-zinc-600"
+                      )} />
+
+                      <AnimatePresence mode="wait">
+                        {isActive ? (
+                          <motion.div
+                            key="full"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -10 }}
+                            className="flex items-center gap-2"
+                          >
+                            <span className="text-xs font-black tracking-tight whitespace-nowrap">
+                              {p.name}
+                              {p.isLocal && <span className="ml-1 opacity-60 text-[10px]">(你)</span>}
+                            </span>
+                            <span className="text-[10px] font-bold bg-black/20 px-1.5 py-0.5 rounded-md">
+                              {p.hand.length}
+                            </span>
+                          </motion.div>
+                        ) : (
+                          <motion.span
+                            key="short"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="text-xs font-black uppercase"
+                          >
+                            {p.name[0]}
+                          </motion.span>
+                        )
+                        }
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              <div className="h-6 w-px bg-white/10 mx-1" />
+
+              <div className="bg-zinc-800/80 px-4 py-2 rounded-xl flex items-center gap-2 border border-white/5 mx-2">
+                <Users size={14} className="text-zinc-500" />
+                <span className="text-[10px] font-black text-zinc-400">{gameState.spectators.length}</span>
               </div>
-              <div className="bg-zinc-900 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-2 shadow-lg">
-                {gameState.direction === 1 ? <ArrowRight size={18} className="text-emerald-500" /> : <ArrowLeft size={18} className="text-emerald-500" />}
+
+              <div className="bg-zinc-800/80 px-4 py-2 rounded-xl flex items-center gap-2 border border-white/5">
+                {gameState.direction === 1 ? <ArrowRight size={14} className="text-emerald-500" /> : <ArrowLeft size={14} className="text-emerald-500" />}
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">方向</span>
               </div>
-            </div>
+            </motion.div>
+
+            {isSpectator && (
+              <div className="flex items-center gap-2">
+                <div className="bg-amber-500/20 border border-amber-500/40 px-4 py-2 rounded-xl flex items-center gap-2 backdrop-blur-md">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                  <span className="text-xs font-black text-amber-500 tracking-tighter uppercase whitespace-nowrap">观战中: {displayedPlayer?.name}</span>
+                </div>
+                {!isShowingActualSelf && (
+                  <button
+                    onClick={() => setViewingPlayerId(localPlayer.id)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/10 p-2 rounded-xl transition-all"
+                    title="回到自己的视角"
+                  >
+                    <RefreshCw size={14} className="text-white" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -1092,62 +1439,58 @@ export default function App() {
           </div>
         </div>
 
-        {/* Turn Timer Progress Bar */}
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-zinc-900 z-[100] pointer-events-none">
+        {/* Turn Timer Progress Bar stays at top but subtle */}
+        <div className="absolute top-0 left-0 w-full h-1 bg-zinc-900 z-[100] pointer-events-none">
           <motion.div
             initial={{ width: "100%" }}
             animate={{ width: `${(gameState.timeLeft / 30) * 100}%` }}
             transition={{ duration: 1, ease: "linear" }}
             className={cn(
-              "h-full transition-colors duration-500 shadow-[0_0_15px_currentColor]",
+              "h-full transition-colors duration-500 shadow-[0_0_10px_currentColor]",
               gameState.timeLeft > 15 ? "bg-emerald-500 text-emerald-500" :
                 gameState.timeLeft > 5 ? "bg-yellow-500 text-yellow-500" : "bg-red-500 text-red-500"
             )}
           />
         </div>
-        <div className={cn(
-          "absolute top-4 left-1/2 -translate-x-1/2 font-mono font-black text-2xl z-[100] pointer-events-none drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]",
-          gameState.timeLeft > 15 ? "text-emerald-500" :
-            gameState.timeLeft > 5 ? "text-yellow-500" : "text-red-500"
-        )}>
-          {gameState.timeLeft}
-        </div>
 
-        {/* Main Board */}
-        <div className="flex-1 relative flex items-center justify-center -mt-8">
-          {/* AI Players Hands (Simplified) */}
-          <div className="absolute inset-0 pointer-events-none">
+        {/* Main Board - Perfectly Centered */}
+        <div className="flex-1 relative flex flex-col items-center justify-center p-8 min-h-0 min-w-0">
+          {/* AI / Other Players Hands (Circular Layout Centered) */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             {(() => {
-              const localIndex = gameState.players.findIndex(p => p.isLocal);
               return gameState.players.map((p, i) => {
-                if (p.isLocal) return null;
-
+                const isViewingThis = p.id === actualViewingId;
+                if (isViewingThis) return null;
                 const playerCount = gameState.players.length;
                 const isLarge = playerCount > 6;
-                const radiusH = isLarge ? 38 : 42;
-                const radiusV = isLarge ? 32 : 38;
-                const iconScale = isLarge ? 0.8 : 1;
+                const radiusH = isLarge ? 30 : 32; // vmin
+                const radiusV = isLarge ? 18 : 22; // vmin
+                const iconScale = isLarge ? 0.75 : 0.9;
 
-                // Calculate relative index so localIndex is at the bottom
-                // (i - localIndex) shifts the current player relative to the observer
-                const relativeIndex = (i - localIndex + playerCount) % playerCount;
+                // Rotate the perspective so effectiveViewIndex is at the bottom (90 degrees or Pi/2)
+                const relativeIndex = (i - effectiveViewIndex + playerCount) % playerCount;
                 const angle = (relativeIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
 
                 return (
                   <div
                     key={p.id}
-                    className="absolute transition-all duration-500"
+                    className="absolute transition-all duration-700 ease-in-out pointer-events-auto"
                     style={{
-                      left: `${50 + Math.cos(angle) * radiusH}%`,
-                      top: `${45 + Math.sin(angle) * radiusV}%`,
+                      left: `calc(50% + ${Math.cos(angle) * radiusH}vmin)`,
+                      top: `calc(50% + ${Math.sin(angle) * radiusV}vmin)`,
                       transform: `translate(-50%, -50%) scale(${iconScale})`
                     }}
                   >
-                    <div className={cn(
-                      "flex flex-col items-center rounded-3xl transition-all",
-                      isLarge ? "gap-1 p-2" : "gap-2 p-4",
-                      gameState.currentPlayerIndex === i ? "bg-emerald-500/10 scale-110" : "opacity-60"
-                    )}>
+                    <motion.div
+                      onClick={() => canSwitchView && setViewingPlayerId(p.id)}
+                      className={cn(
+                        "flex flex-col items-center rounded-3xl transition-all group",
+                        canSwitchView ? "cursor-pointer" : "cursor-default",
+                        isLarge ? "gap-1 p-2" : "gap-2 p-4",
+                        gameState.currentPlayerIndex === i ? "bg-emerald-500/10 ring-2 ring-emerald-500/20 scale-110" : "opacity-80 hover:opacity-100",
+                        isViewingThis && "ring-2 ring-white/40 bg-white/5"
+                      )}
+                    >
                       <div className="relative">
                         <AnimatePresence>
                           {p.hasShoutedUNO && (
@@ -1173,8 +1516,8 @@ export default function App() {
                             seeAllHands && "cursor-zoom-in hover:border-emerald-500/50 hover:scale-110"
                           )}
                         >
-                          <span className="text-xs font-black">{p.hand.length}</span>
-                          {seeAllHands && (
+                          {!isViewingThis && <span className="text-xs font-black">{p.hand.length}</span>}
+                          {seeAllHands && !isViewingThis && (
                             <>
                               <div className="absolute inset-0 bg-black/80 flex flex-wrap gap-0.5 p-1 items-center justify-center overflow-y-auto">
                                 {p.hand.map((c, i) => (
@@ -1227,8 +1570,8 @@ export default function App() {
                           />
                         )}
                       </div>
-                      <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>
-                    </div>
+                      {!isViewingThis && <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>}
+                    </motion.div>
                   </div>
                 );
               });
@@ -1241,7 +1584,10 @@ export default function App() {
 
 
             {/* Discard Pile Zone */}
-            <div className="relative w-24 h-32 flex items-center justify-center">
+            <div
+              className="relative flex items-center justify-center"
+              style={{ width: 'var(--card-w)', height: 'var(--card-h)' }}
+            >
               {/* This is the invisible hover catcher that grows to cover the fan-out area */}
               <div
                 onMouseEnter={() => setIsDiscardHovered(true)}
@@ -1249,7 +1595,7 @@ export default function App() {
                 className={cn(
                   "absolute z-[150] cursor-help transition-all duration-300 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
                   isDiscardHovered
-                    ? "w-[750px] h-[350px] opacity-100"
+                    ? "w-[min(750px,80vw)] h-[min(350px,50vh)] opacity-100"
                     : "w-24 h-32 opacity-0"
                 )}
               />
@@ -1262,9 +1608,12 @@ export default function App() {
                   // Fan out calculation
                   const centerOffset = idx - (arr.length - 1) / 2;
 
-                  const fanX = isDiscardHovered ? centerOffset * 130 : centerOffset * 2;
-                  const fanY = isDiscardHovered ? Math.abs(centerOffset) * 25 : Math.abs(centerOffset) * 2;
-                  const fanRotate = isDiscardHovered ? centerOffset * 15 : (isTop ? (Math.random() - 0.5) * 6 : centerOffset * 2);
+                  // Fallback pseudo-random for messy stack without render-vibration
+                  const pseudoRandom = (card.id.charCodeAt(card.id.length - 1) % 10) - 5;
+
+                  const fanX = isDiscardHovered ? centerOffset * 130 : 0;
+                  const fanY = isDiscardHovered ? Math.abs(centerOffset) * 25 : 0;
+                  const fanRotate = isDiscardHovered ? centerOffset * 15 : (isTop ? pseudoRandom : 0);
 
                   return (
                     <motion.div
@@ -1316,34 +1665,36 @@ export default function App() {
           <AnimatePresence>
             {drawingCards.map(dc => {
               const playerCount = gameState.players.length;
-              const angle = (dc.playerIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
-              const isLocal = gameState.players[dc.playerIndex]?.isLocal;
+              // Must match the relative index logic used in avatars
+              const relativeIndex = (dc.playerIndex - effectiveViewIndex + playerCount) % playerCount;
+              const angle = (relativeIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
 
               const isLarge = playerCount > 6;
-              const radiusH = isLarge ? 38 : 42;
-              const radiusV = isLarge ? 32 : 38;
-              const iconScale = isLarge ? 0.8 : 1;
+              const radiusH = isLarge ? 30 : 32;
+              const radiusV = isLarge ? 18 : 22;
+              const iconScale = isLarge ? 0.75 : 0.9;
 
-              // Target positions matched exactly with player icon positions
+              // Target positions matched exactly with player icon positions (using vmin now)
+              // Since the outer container of motion.div is centered, tx/ty are offsets in vmin
               const tx = Math.cos(angle) * radiusH;
-              const ty = Math.sin(angle) * radiusV - 5; // Offset by 5 to match the 45% center used in icons
+              const ty = Math.sin(angle) * radiusV;
 
               return (
                 <motion.div
                   key={dc.id}
                   initial={{ x: "-45vw", y: "40vh", opacity: 0, scale: 0.5, rotate: 0 }}
                   animate={{
-                    x: `${tx}vw`,
-                    y: `${ty}vh`,
+                    x: `${tx}vmin`,
+                    y: `${ty}vmin`,
                     opacity: 1,
-                    scale: isLocal ? 1 : (0.6 * iconScale),
+                    scale: dc.playerIndex === effectiveViewIndex ? 1 : (0.6 * iconScale),
                     rotate: 720
                   }}
                   exit={{ opacity: 0, scale: 0 }}
                   transition={{ duration: 0.6, ease: [0.23, 1, 0.32, 1] }}
                   className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
                 >
-                  <Card card={dc.card} isFaceDown={!isLocal} className="shadow-[0_20px_60px_rgba(0,0,0,0.8)]" />
+                  <Card card={dc.card} isFaceDown={dc.playerIndex !== effectiveViewIndex} className="shadow-[0_20px_60px_rgba(0,0,0,0.8)]" />
                 </motion.div>
               );
             })}
@@ -1356,14 +1707,14 @@ export default function App() {
         )}>
           {/* JUMP IN! Bubble for Local Player */}
           <AnimatePresence>
-            {gameState.jumpInPlayerId === localPlayer.id && (
+            {localPlayer && gameState.jumpInPlayerId === localPlayer.id && (
               <ComicBubble text="JUMP IN!" className="-top-32" color="yellow" />
             )}
           </AnimatePresence>
 
           {/* UNO Speech Bubble for Local Player */}
           <AnimatePresence>
-            {localPlayer.hasShoutedUNO && (
+            {localPlayer && localPlayer.hasShoutedUNO && (
               <ComicBubble text="UNO !!!" className="-top-32" />
             )}
           </AnimatePresence>
@@ -1392,16 +1743,26 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          <div className="flex items-center gap-4 mb-20 z-[200] pointer-events-auto">
-            {/* Turn Indicator */}
+          <div className="flex items-center gap-4 mb-20 z-[200] pointer-events-auto" style={{ transform: 'scale(var(--ui-scale))' }}>
             <div className={cn(
-              "px-6 py-2 rounded-full border transition-all flex items-center gap-3",
-              isLocalTurn ? "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)]" : "border-white/10"
+              "px-6 py-2 rounded-full border transition-all flex items-center gap-3 bg-zinc-950/50 backdrop-blur-md",
+              isTargetTurn ? "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)]" : "border-white/10"
             )}>
-              <div className={cn("w-2 h-2 rounded-full", isLocalTurn ? "bg-emerald-400 animate-ping" : "bg-zinc-700")} />
-              <span className="text-xs font-black uppercase tracking-widest">
-                {isLocalTurn ? "你的回合" : `${gameState.players[gameState.currentPlayerIndex].name} 的回合`}
-              </span>
+              <div className={cn("w-2 h-2 rounded-full", isTargetTurn ? "bg-emerald-400 animate-ping" : "bg-zinc-700")} />
+              <div className="flex flex-col items-start -space-y-1">
+                <span className="text-xs font-black uppercase tracking-widest">
+                  {isTargetTurn ? (isShowingActualSelf ? "你的回合" : `${displayedPlayer?.name} 的回合`) : `${gameState.players[gameState.currentPlayerIndex].name} 的回合`}
+                </span>
+              </div>
+              {isTargetTurn && (
+                <div className={cn(
+                  "ml-2 font-mono font-black text-lg min-w-[1.5ch]",
+                  gameState.timeLeft > 15 ? "text-emerald-400" :
+                    gameState.timeLeft > 5 ? "text-yellow-400" : "text-red-500"
+                )}>
+                  {gameState.timeLeft}
+                </div>
+              )}
             </div>
 
             {/* Recommendation Toggle */}
@@ -1417,44 +1778,44 @@ export default function App() {
 
             {/* Action Buttons */}
             <AnimatePresence mode="wait">
-              {isAnimating ? null : isLocalTurn ? (
+              {isAnimating || isPendingColor ? null : isLocalTurn ? (
                 <div className="flex gap-4">
-                  {selectedCardId ? (
+                  <motion.button
+                    key="draw-btn"
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.8, opacity: 0 }}
+                    onClick={() => {
+                      setSelectedCardId(null);
+                      drawCard(gameState.currentPlayerIndex);
+                    }}
+                    className={cn(
+                      "px-10 py-2.5 text-sm font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
+                      gameState.drawStack > 0
+                        ? "bg-red-500 text-white shadow-[0_10px_30px_rgba(239,68,68,0.4)] hover:scale-105 active:scale-95"
+                        : "bg-amber-500 text-white shadow-[0_10px_40px_rgba(245,158,11,0.4)] hover:bg-amber-400"
+                    )}
+                  >
+                    <RefreshCw size={16} className={cn(gameState.drawStack > 0 && "animate-spin-slow")} />
+                    {gameState.drawStack > 0 ? `认罚！摸 ${gameState.drawStack} 张` : '直接摸牌'}
+                  </motion.button>
+
+                  {selectedCardId && (
                     <motion.button
                       key="play-btn"
-                      initial={{ scale: 0.8, y: 10, opacity: 0 }}
-                      animate={{ scale: 1, y: 0, opacity: 1 }}
-                      exit={{ scale: 0.8, y: 10, opacity: 0 }}
+                      initial={{ scale: 0.8, x: 20, opacity: 0 }}
+                      animate={{ scale: 1, x: 0, opacity: 1 }}
+                      exit={{ scale: 0.8, x: 20, opacity: 0 }}
                       onClick={() => playCard(gameState.currentPlayerIndex, selectedCardId)}
                       className="px-10 py-2.5 bg-emerald-500 text-white text-sm font-black uppercase tracking-widest rounded-full shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
                     >
                       <Play size={16} fill="currentColor" /> 确定出牌
                     </motion.button>
-                  ) : (
-                    <motion.button
-                      key="draw-btn"
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      onClick={() => {
-                        setSelectedCardId(null);
-                        drawCard(gameState.currentPlayerIndex);
-                      }}
-                      className={cn(
-                        "px-10 py-2.5 text-sm font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
-                        gameState.drawStack > 0
-                          ? "bg-red-500 text-white shadow-[0_10px_30px_rgba(239,68,68,0.4)] hover:scale-105 active:scale-95"
-                          : "bg-amber-500 text-white shadow-[0_10px_40px_rgba(245,158,11,0.4)] hover:bg-amber-400"
-                      )}
-                    >
-                      <RefreshCw size={16} className={cn(gameState.drawStack > 0 && "animate-spin-slow")} />
-                      {gameState.drawStack > 0 ? `认罚！摸 ${gameState.drawStack} 张` : '直接摸牌'}
-                    </motion.button>
                   )}
                 </div>
               ) : (
                 (() => {
-                  const selectedCard = localPlayer.hand.find(c => c.id === selectedCardId);
+                  const selectedCard = localPlayer?.hand.find((c: any) => c.id === selectedCardId);
                   return selectedCardId && !isAnimating && selectedCard && canJumpIn(selectedCard, topCard, gameState.drawStack) && (
                     <motion.button
                       key="jump-btn"
@@ -1464,7 +1825,6 @@ export default function App() {
                       onMouseEnter={() => playSound('btnHover')}
                       onClick={() => {
                         const localPlayerIndex = gameState.players.findIndex(p => p.isLocal);
-                        playSound('jump');
                         playCard(localPlayerIndex, selectedCardId);
                       }}
                       className="px-10 py-3 bg-yellow-400 text-black text-sm font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
@@ -1483,7 +1843,7 @@ export default function App() {
               onMouseLeave={() => setIsHandHovered(false)}
               className="relative flex items-center justify-center w-full h-48 pointer-events-auto"
             >
-              {[...localPlayer.hand]
+              {[...displayedPlayer.hand]
                 .filter(card => !drawingCards.some(dc => dc.card.id === card.id))
                 .sort((a, b) => {
                   if (sortType === 'color') {
@@ -1515,7 +1875,7 @@ export default function App() {
                   const xOffset = offset * xStep;
 
                   const yFactor = isHandHovered ? 15 : 5;
-                  const fanY = Math.pow(Math.abs(offset), 1.5) * (yFactor / Math.max(total * 0.1, 1));
+                  const fanY = Math.pow(Math.abs(offset), 1.5) * (yFactor / Math.max(total * 0.1, 1)) * (window.innerHeight < 500 ? 0.3 : 1);
                   const yOffset = isHorizontal ? (isHandHovered ? -20 : 0) : fanY;
 
                   const lastNumberValue = [...gameState.discardPile].reverse().find(isNumberCard)?.value || null;
@@ -1580,7 +1940,7 @@ export default function App() {
   };
 
   const renderEnd = () => {
-    const localPlayer = gameState.players.find(p => p.isLocal);
+    const localPlayer = [...gameState.players, ...gameState.spectators].find(p => p.isLocal);
     const isWin = localPlayer && gameState.winner === localPlayer.name;
 
     return (
@@ -1592,7 +1952,10 @@ export default function App() {
           className="absolute inset-0 bg-black/40 backdrop-blur-[2px] pointer-events-auto"
         />
 
-        <div className="relative z-10 flex flex-col items-center gap-12 pointer-events-auto">
+        <div
+          className="relative z-10 flex flex-col items-center gap-8 pointer-events-auto"
+          style={{ transform: 'scale(var(--ui-scale))' }}
+        >
           {/* Victory Bubble */}
           <div className="relative -mt-20">
             <ComicBubble
@@ -1730,7 +2093,7 @@ export default function App() {
                       type="text"
                       value={inputRoomCode}
                       onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
-                      placeholder="输入 4 位房间代码..."
+                      placeholder="输入 6 位房间代码..."
                       className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-sm"
                     />
                     <button
@@ -1750,18 +2113,21 @@ export default function App() {
               </div>
 
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">大厅中正在等待的房间</span>
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">在线房间列表</span>
               </div>
               <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-2 custom-scrollbar">
                 {activeRooms.length === 0 ? (
                   <div className="text-center py-12 text-zinc-500 italic">
-                    目前没有正在等待的房间...
+                    目前没有任何活动的房间...
                   </div>
                 ) : (
-                  activeRooms.map((room) => (
+                  activeRooms.map((room: any) => (
                     <div
                       key={room.code}
-                      className="w-full flex items-center justify-between p-4 bg-zinc-800/50 border border-white/5 rounded-2xl transition-all"
+                      className={cn(
+                        "w-full flex items-center justify-between p-4 border rounded-2xl transition-all",
+                        room.status === 'playing' ? "bg-amber-500/5 border-amber-500/10" : "bg-zinc-800/50 border-white/5"
+                      )}
                     >
                       <div className="flex flex-col items-start gap-1">
                         <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none">房间信息</span>
@@ -1769,9 +2135,16 @@ export default function App() {
                           <span className="text-xl font-black font-mono tracking-widest uppercase text-white">{room.code}</span>
                           <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-zinc-400 whitespace-nowrap">房主: {room.hostName || '未知'}</span>
-                            <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
-                              <Users size={10} /> {room.playerCount}/10
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
+                                <Users size={10} /> {room.playerCount}/10
+                              </span>
+                              {room.status === 'playing' ? (
+                                <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-amber-500/20">游戏中</span>
+                              ) : (
+                                <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-emerald-500/20">等待中</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1780,7 +2153,6 @@ export default function App() {
                         onClick={() => {
                           if (!playerName) {
                             setShowRoomHall(false);
-                            // Focus on name input if possible, but at least close hall
                             playSound('click');
                             return;
                           }
@@ -1795,12 +2167,12 @@ export default function App() {
                         className={cn(
                           "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
                           playerName
-                            ? "bg-emerald-500 text-white hover:bg-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.2)]"
+                            ? (room.status === 'playing' ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
                             : "bg-zinc-700 text-zinc-400 cursor-not-allowed"
                         )}
-                        title={!playerName ? "请先输入昵称" : "点击加入"}
+                        title={!playerName ? "请先输入昵称" : (room.status === 'playing' ? "点击观战" : "点击加入")}
                       >
-                        {playerName ? '立即加入' : '请输入昵称'}
+                        {playerName ? (room.status === 'playing' ? '观战' : '加入') : '请输入昵称'}
                       </button>
                     </div>
                   ))

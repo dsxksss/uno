@@ -20,8 +20,9 @@ func (r *Room) StartGame() {
 			ID:            p.ID,
 			Name:          p.Name,
 			Hand:          []CardData{},
-			IsLocal:       true,
+			IsLocal:       p.IsLocal,
 			HasShoutedUno: false,
+			Difficulty:    p.Difficulty,
 		}
 	}
 
@@ -62,7 +63,8 @@ func (r *Room) StartGame() {
 		TimeLeft:           30,
 		DrawStack:          0,
 		CurrentWildColor:   "",
-		IsDevMode:          false,
+		IsDevMode:          r.State.IsDevMode,
+		Spectators:         r.State.Spectators,
 	}
 
 	go r.StartTimer()
@@ -185,11 +187,15 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 
 	if card.Value == Reverse {
 		nextDirection = r.State.Direction * -1
-		if len(r.State.Players) == 2 {
+		if len(r.State.Players) == 2 && newDrawStack == 0 {
 			skipNext = true
 		}
 	} else if card.Value == Skip {
-		skipNext = true
+		if len(r.State.Players) == 2 && newDrawStack > 0 {
+			skipNext = false
+		} else {
+			skipNext = true
+		}
 	} else if card.Value == Draw2 {
 		newDrawStack += 2
 	} else if card.Value == Draw4 {
@@ -272,7 +278,7 @@ func (r *Room) DrawCard(playerID string) {
 		}
 	}
 
-	if playerIndex != r.State.CurrentPlayerIndex {
+	if playerIndex != r.State.CurrentPlayerIndex || r.State.PendingWildColorPlayerIndex != nil {
 		return
 	}
 
@@ -407,11 +413,22 @@ func (r *Room) RemovePlayer(playerID string) {
 		newPlayers = append(newPlayers, p)
 	}
 
+	r.State.Players = newPlayers
+
+	// Also check spectators
+	newSpectators := []Player{}
+	for _, p := range r.State.Spectators {
+		if p.ID == playerID {
+			found = true
+			continue
+		}
+		newSpectators = append(newSpectators, p)
+	}
+	r.State.Spectators = newSpectators
+
 	if !found {
 		return
 	}
-
-	r.State.Players = newPlayers
 
 	// If game was playing, we might need to adjust CurrentPlayerIndex
 	if r.State.Status == Playing {

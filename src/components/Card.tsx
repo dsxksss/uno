@@ -56,8 +56,9 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
   if (isFaceDown) {
     return (
       <motion.div
+        style={{ width: 'var(--card-w)', height: 'var(--card-h)' }}
         className={cn(
-          "relative w-24 h-36 rounded-xl border-4 border-zinc-800 bg-zinc-900 flex items-center justify-center shadow-xl overflow-hidden",
+          "relative rounded-xl border-4 border-zinc-800 bg-zinc-900 flex items-center justify-center shadow-xl overflow-hidden",
           className
         )}
         whileHover={{ scale: 1.05, y: -10 }}
@@ -74,6 +75,8 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
         rotateX,
         rotateY,
         transformStyle: "preserve-3d",
+        width: 'var(--card-w)',
+        height: 'var(--card-h)'
       }}
       initial={false}
       animate={{
@@ -93,7 +96,7 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
       transition={{ type: "spring", stiffness: 500, damping: 30 }}
       onClick={!disabled ? onClick : undefined}
       className={cn(
-        "relative w-24 h-36 rounded-xl border-4 flex flex-col items-center justify-between p-2 shadow-2xl cursor-pointer select-none transition-colors duration-500",
+        "relative rounded-xl border-4 flex flex-col items-center justify-between p-2 shadow-2xl cursor-pointer select-none transition-colors duration-500",
         (card.color === 'wild' && card.chosenColor) ? COLOR_MAP[card.chosenColor] : COLOR_MAP[card.color],
         disabled && "cursor-not-allowed",
         isHighlighted && "ring-4 ring-white ring-offset-4 ring-offset-zinc-950",
@@ -109,7 +112,7 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
       </div>
 
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-4xl font-black italic tracking-tighter drop-shadow-lg transform -rotate-12">
+        <div className="text-[length:calc(2.5rem*var(--ui-scale))] font-black italic tracking-tighter drop-shadow-lg transform -rotate-12">
           {card.value === 'draw2' ? '+2' :
             card.value === 'draw4' ? '+4' :
               card.value === 'skip' ? '⊘' :

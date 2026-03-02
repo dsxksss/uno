@@ -41,6 +41,7 @@ export interface GameState {
   pendingWildColorPlayerIndex: number | null;
   pendingUNOPlayerId: string | null;
   jumpInPlayerId: string | null;
+  spectators: Player[];
   isReverseActive: boolean;
   isDevMode: boolean;
   playerLeftMessage?: string;
