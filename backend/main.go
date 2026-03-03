@@ -15,8 +15,8 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
 		return true // For development purposes
 	},
@@ -40,6 +40,7 @@ type Room struct {
 	State     GameState
 	Mutex     sync.Mutex
 	Broadcast chan []byte
+	Stop      chan struct{}
 }
 
 var (
@@ -52,6 +53,7 @@ func NewRoom(code string) *Room {
 		Code:      code,
 		Clients:   make(map[string]*Client),
 		Broadcast: make(chan []byte),
+		Stop:      make(chan struct{}),
 		State: GameState{
 			Status: Lobby,
 			RoomCode: code,
@@ -69,34 +71,55 @@ func (r *Room) Run() {
 	for {
 		select {
 		case msg := <-r.Broadcast:
-			for id, client := range r.Clients {
+			r.Mutex.Lock()
+			for _, client := range r.Clients {
 				select {
 				case client.Send <- msg:
 				default:
-					close(client.Send)
-					delete(r.Clients, id)
+					// Skip this update if buffer is full instead of closing
+					// log.Printf("Warning: Client %s buffer full, skipping update", id)
 				}
 			}
+			r.Mutex.Unlock()
+		case <-r.Stop:
+			return
 		}
 	}
 }
 
 func (r *Room) UpdateState() {
+	r.Mutex.Lock()
+	state := r.State
+	r.Mutex.Unlock()
+
 	// Create actual state message
 	type StatePayload struct {
 		State GameState `json:"state"`
 	}
 	
-	payload, _ := json.Marshal(StatePayload{State: r.State})
+	payload, err := json.Marshal(StatePayload{State: state})
+	if err != nil {
+		log.Printf("Marshal error: %v", err)
+		return
+	}
 	fullMsg, _ := json.Marshal(Message{
 		Type:    "UPDATE_STATE",
 		Payload: payload,
 	})
 	
-	r.Broadcast <- fullMsg
+	// Non-blocking send to prevent deadlocks if the Run loop is stopped
+	select {
+	case r.Broadcast <- fullMsg:
+	case <-time.After(50 * time.Millisecond):
+		// Skip if broadcast is blocked
+	}
 }
 
 func (r *Room) cleanupIfAbandoned() {
+	// Acquire locks in safe order: global roomsMutex first, then room Mutex
+	roomsMutex.Lock()
+	defer roomsMutex.Unlock()
+	
 	r.Mutex.Lock()
 	defer r.Mutex.Unlock()
 
@@ -116,15 +139,45 @@ func (r *Room) cleanupIfAbandoned() {
 		}
 	}
 
-	if !hasHuman {
-		roomsMutex.Lock()
+	if !hasHuman || len(r.Clients) == 0 {
 		if _, exists := rooms[r.Code]; exists {
 			delete(rooms, r.Code)
-			log.Printf("Room %s closed: no human players left\n", r.Code)
+			
+			// Use a select to close the Stop channel only once if it exists
+			select {
+			case <-r.Stop:
+				// Already closed
+			default:
+				close(r.Stop) // Stop the Run goroutine
+			}
+			
+			log.Printf("Room %s closed: no human players left or no connections\n", r.Code)
 			r.State.Status = Ended
 		}
-		roomsMutex.Unlock()
 	}
+}
+
+func startPeriodicCleanup() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			roomsMutex.Lock()
+			codes := make([]string, 0, len(rooms))
+			for code := range rooms {
+				codes = append(codes, code)
+			}
+			roomsMutex.Unlock()
+
+			for _, code := range codes {
+				roomsMutex.Lock()
+				room, exists := rooms[code]
+				roomsMutex.Unlock()
+				if exists {
+					room.cleanupIfAbandoned()
+				}
+			}
+		}
+	}()
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +190,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		ID:   NewID(),
 		Conn: conn,
-		Send: make(chan []byte, 256),
+		Send: make(chan []byte, 512),
 	}
 
 	go client.writePump()
@@ -343,18 +396,38 @@ func (c *Client) handleMessage(msg Message) {
 		roomsMutex.Lock()
 		activeRooms := []map[string]interface{}{}
 		for _, r := range rooms {
-			if len(r.State.Players) > 0 {
-				hostName := "未知"
-				if len(r.State.Players) > 0 {
-					hostName = r.State.Players[0].Name
-				}
-				activeRooms = append(activeRooms, map[string]interface{}{
-					"code":        r.Code,
-					"playerCount": len(r.State.Players),
-					"hostName":    hostName,
-					"status":      r.State.Status,
-				})
+			r.Mutex.Lock()
+			// 获胜后或没有玩家时不显示在房间列表
+			if r.State.Status == Ended || len(r.State.Players) == 0 {
+				r.Mutex.Unlock()
+				continue
 			}
+
+			// 检查是否有真人在内（可选，但通常公共列表只显示有人的房间）
+			hasHuman := false
+			for _, p := range r.State.Players {
+				if p.IsLocal {
+					hasHuman = true
+					break
+				}
+			}
+			if !hasHuman {
+				r.Mutex.Unlock()
+				continue
+			}
+
+			hostName := "未知"
+			if len(r.State.Players) > 0 {
+				hostName = r.State.Players[0].Name
+			}
+			
+			activeRooms = append(activeRooms, map[string]interface{}{
+				"code":        r.Code,
+				"playerCount": len(r.State.Players),
+				"hostName":    hostName,
+				"status":      r.State.Status,
+			})
+			r.Mutex.Unlock()
 		}
 		roomsMutex.Unlock()
 
@@ -413,6 +486,8 @@ func main() {
 	flag.Parse()
 
 	rand.Seed(time.Now().UnixNano())
+	
+	startPeriodicCleanup()
 	
 	http.HandleFunc("/ws", handleWebSocket)
 	

@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion, useMotionValue, useSpring, useTransform } from 'motion/react';
-import { CardData, CardColor } from '../types';
-import { cn } from '../types';
+import { CardData, cn } from '../types';
 
 interface CardProps {
   card: CardData;
@@ -21,7 +20,7 @@ const COLOR_MAP: Record<string, string> = {
   wild: 'bg-zinc-900 border-zinc-700 text-white shadow-white/5',
 };
 
-export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown, className, isHighlighted, isSelected }) => {
+export const Card = React.memo<CardProps>(({ card, onClick, disabled, isFaceDown, className, isHighlighted, isSelected }) => {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
 
@@ -143,4 +142,4 @@ export const Card: React.FC<CardProps> = ({ card, onClick, disabled, isFaceDown,
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-gradient-to-br from-white/40 via-transparent to-black/20 rounded-lg" />
     </motion.div>
   );
-};
+});

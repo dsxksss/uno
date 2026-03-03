@@ -4,7 +4,6 @@ import { Card } from './components/Card';
 import { CardData, GameState, Player, cn, CardColor, Difficulty } from './types';
 import { createDeck, canPlayCard, canJumpIn, shuffle, isNumberCard } from './utils';
 import { Users, Plus, Play, LogIn, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft, Copy, Check, Globe } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { Howl } from 'howler';
 
 const INITIAL_HAND_SIZE = 7;
@@ -108,7 +107,8 @@ export default function App() {
   const [seeAllHands, setSeeAllHands] = useState(false);
   const [hoveredGodModePlayerId, setHoveredGodModePlayerId] = useState<string | null>(null);
   const [activeRooms, setActiveRooms] = useState<{ code: string, playerCount: number }[]>([]);
-  const [showRoomHall, setShowRoomHall] = useState(false);
+  const [showRoomHall, setShowRoomHall] = useState(true);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const lastPlayedCardIdRef = useRef<string | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -121,12 +121,13 @@ export default function App() {
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
   const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
   const isSpectator = gameState.spectators.some(s => s.isLocal);
-  const me = [...gameState.players, ...gameState.spectators].find(p => p.isLocal);
-  const isHost = gameState.players[0]?.isLocal;
+  const me = [...(gameState.players || []), ...(gameState.spectators || [])].find(p => p.isLocal);
+  const isHost = gameState.players?.[0]?.isLocal;
   const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
 
   useEffect(() => {
-    const socket = new WebSocket(`ws://${window.location.host}/ws`);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
     socketRef.current = socket;
 
     socket.onmessage = (event) => {
@@ -135,7 +136,11 @@ export default function App() {
         const id = msg.payload.id;
         clientIdRef.current = id;
         setClientId(id);
+
+        // Connection established, request room list
+        socket.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
       } else if (msg.type === 'UPDATE_STATE') {
+        // ... existing state update logic ... (handled by replace_file_content)
         const newState = msg.payload.state;
 
         // Mark which player is local based on clientIdRef
@@ -226,31 +231,14 @@ export default function App() {
       setTimeout(() => setActionBubble(null), 1200);
     }
 
-    // Enhanced Particle effect
-    const colors = {
-      'red': '#ef4444',
-      'blue': '#3b82f6',
-      'green': '#10b981',
-      'yellow': '#fbbf24',
-      'wild': '#ffffff'
-    };
-    const particleColor = colors[color as keyof typeof colors] || '#ffffff';
-
-    confetti({
-      particleCount: particleCount,
-      spread: 70 + (shakeIntensity * 20),
-      origin: { x: 0.5, y: 0.45 },
-      colors: [particleColor, '#ffffff'],
-      scalar: 0.6 + (shakeIntensity * 0.2),
-      gravity: 1.0 + (shakeIntensity * 0.2),
-      ticks: 150,
-      shapes: ['circle'],
-      startVelocity: 35 + (shakeIntensity * 10)
-    });
+    if (isUltra) {
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 2000);
+    }
   }, [triggerShake]);
 
   const createRoom = () => {
-    if (!playerName || !socketRef.current) return;
+    if (!playerName || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({
       type: 'CREATE_ROOM',
       payload: { playerName }
@@ -279,20 +267,16 @@ export default function App() {
     }));
 
     if (gameState.players[gameState.currentPlayerIndex]?.isLocal) {
-      confetti({
-        particleCount: 150,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#ef4444', '#3b82f6', '#10b981', '#fbbf24']
-      });
       playSound('win');
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
     } else {
       playSound('lose');
     }
   };
 
   const joinRoom = () => {
-    if (!playerName || !inputRoomCode || !socketRef.current) return;
+    if (!playerName || !inputRoomCode || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({
       type: 'JOIN_ROOM',
       payload: { playerName, roomCode: inputRoomCode }
@@ -443,7 +427,7 @@ export default function App() {
   // Monitor draw actions for sound
   const prevTotalHandSize = useRef(0);
   useEffect(() => {
-    const currentTotal = gameState.players.reduce((sum, p) => sum + p.hand.length, 0);
+    const currentTotal = (gameState.players || []).reduce((sum, p) => sum + (p.hand?.length || 0), 0);
     if (currentTotal > prevTotalHandSize.current && gameState.status === 'playing') {
       playSound('draw');
     }
@@ -580,23 +564,142 @@ export default function App() {
           style={{ transform: 'scale(var(--ui-scale))' }}
         >
           {!gameState.roomCode ? (
-            <>
-              <div className="flex flex-col items-center justify-center py-4">
-                <button
-                  onClick={() => {
-                    socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
-                    setShowRoomHall(true);
-                  }}
-                  onMouseEnter={() => playSound('btnHover')}
-                  className="w-full flex items-center justify-center gap-3 bg-white text-black font-black py-6 rounded-2xl hover:scale-105 active:scale-95 transition-all text-xl shadow-[0_10px_30px_rgba(255,255,255,0.2)]"
-                >
-                  <Globe size={24} /> 进入游戏大厅
-                </button>
-                <p className="mt-8 text-zinc-500 text-[10px] font-bold uppercase tracking-widest text-center">
-                  在这里创建或加入多人游戏
-                </p>
-              </div>
-            </>
+            <div className="flex flex-col items-center justify-center py-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="w-full space-y-6"
+              >
+                {/* 昵称输入区 - 移入主面板 */}
+                <div className={cn(
+                  "p-5 rounded-3xl border transition-all",
+                  !playerName ? "bg-amber-500/5 border-amber-500/20" : "bg-zinc-800/30 border-white/5"
+                )}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={cn(
+                      "text-xs font-black uppercase tracking-widest",
+                      !playerName ? "text-amber-500" : "text-zinc-400"
+                    )}>
+                      {!playerName ? "⚠️ 请先设置昵称" : "第一步：输入昵称"}
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="输入你的名字..."
+                    className="w-full bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 focus:border-emerald-500/50 outline-none transition-all font-bold text-sm"
+                  />
+                </div>
+
+                {/* 房间列表区 */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                      <Globe size={12} className="text-emerald-500" /> 在线房间列表
+                    </span>
+                    <button
+                      onClick={() => socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }))}
+                      className="text-[10px] text-zinc-500 hover:text-white transition-all flex items-center gap-1"
+                    >
+                      <RefreshCw size={10} /> 刷新
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {activeRooms.length === 0 ? (
+                      <div className="text-center py-10 bg-zinc-900/30 rounded-2xl border border-dashed border-white/5 text-zinc-500 text-xs italic">
+                        目前没有任何可加入的房间...
+                      </div>
+                    ) : (
+                      activeRooms.map((room: any) => (
+                        <div
+                          key={room.code}
+                          className={cn(
+                            "w-full flex items-center justify-between p-4 border rounded-2xl transition-all hover:border-emerald-500/30 group",
+                            room.status === 'playing' ? "bg-amber-500/5 border-amber-500/10" : "bg-zinc-800/50 border-white/5"
+                          )}
+                        >
+                          <div className="flex flex-col items-start gap-1">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl font-black font-mono tracking-widest uppercase text-white">{room.code}</span>
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-zinc-400">房主: {room.hostName || '未知'}</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
+                                    <Users size={10} /> {room.playerCount}/10
+                                  </span>
+                                  {room.status === 'playing' ? (
+                                    <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-amber-500/20">游戏中</span>
+                                  ) : (
+                                    <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-emerald-500/20">等待中</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              if (!playerName) return;
+                              socketRef.current?.send(JSON.stringify({
+                                type: 'JOIN_ROOM',
+                                payload: { playerName, roomCode: room.code }
+                              }));
+                              playSound('click');
+                            }}
+                            className={cn(
+                              "px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                              playerName
+                                ? (room.status === 'playing' ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
+                                : "bg-zinc-800 text-zinc-600 grayscale cursor-not-allowed border border-white/5"
+                            )}
+                          >
+                            {playerName ? (room.status === 'playing' ? '观战' : '加入') : '设置昵称'}
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* 快速加入/创建操作 */}
+                <div className="pt-4 border-t border-white/5 flex flex-col gap-3">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inputRoomCode}
+                      onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
+                      placeholder="自定义房间代码..."
+                      className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!playerName || !inputRoomCode) return;
+                        joinRoom();
+                      }}
+                      onMouseEnter={() => playSound('btnHover')}
+                      disabled={!playerName || !inputRoomCode}
+                      className="bg-zinc-700 text-white px-6 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-30 font-bold flex items-center gap-2 whitespace-nowrap"
+                    >
+                      <Plus size={14} /> 加入私房
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      if (!playerName) return;
+                      createRoom();
+                    }}
+                    onMouseEnter={() => playSound('btnHover')}
+                    disabled={!playerName}
+                    className="w-full bg-emerald-500 text-white px-6 py-4 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 font-black flex items-center justify-center gap-2 shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
+                  >
+                    <Plus size={18} /> 创建新房间
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           ) : (
             <div className="space-y-8">
               <div className="text-center relative group">
@@ -1024,30 +1127,11 @@ export default function App() {
             {ripples.map(ripple => (
               <motion.div
                 key={ripple.id}
-                initial={{ scale: 0, opacity: 1, border: `${ripple.thickness}px solid ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}` }}
+                initial={{ scale: 0, opacity: 0.6 }}
                 animate={{ scale: ripple.scale, opacity: 0 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 2.2, ease: "easeOut" }}
-                className="absolute rounded-full"
-                style={{
-                  left: `${ripple.x}%`,
-                  top: `${ripple.y}%`,
-                  width: '40vmax',
-                  height: '40vmax',
-                  marginLeft: '-20vmax',
-                  marginTop: '-20vmax',
-                  boxShadow: `0 0 50px ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}33`
-                }}
-              />
-            ))}
-            {ripples.map(ripple => (
-              <motion.div
-                key={ripple.id + '-inner'}
-                initial={{ scale: 0, opacity: 0.6, border: `${ripple.thickness / 2}px solid ${ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'}` }}
-                animate={{ scale: ripple.scale * 0.8, opacity: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 1.8, ease: "easeOut", delay: 0.15 }}
-                className="absolute rounded-full"
+                transition={{ duration: 1.5, ease: "easeOut" }}
+                className="absolute rounded-full border-2 border-white/20"
                 style={{
                   left: `${ripple.x}%`,
                   top: `${ripple.y}%`,
@@ -1055,6 +1139,7 @@ export default function App() {
                   height: '30vmax',
                   marginLeft: '-15vmax',
                   marginTop: '-15vmax',
+                  borderColor: ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'
                 }}
               />
             ))}
@@ -1759,7 +1844,6 @@ export default function App() {
                   return (
                     <motion.div
                       key={card.id}
-                      layout
                       initial={{ scale: 0.5, opacity: 0, y: 100 }}
                       animate={{
                         y: yOffset,
@@ -1910,178 +1994,47 @@ export default function App() {
       {(gameState.status === 'playing' || gameState.status === 'ended') && renderGame()}
       {gameState.status === 'ended' && renderEnd()}
 
-      {/* Room Hall Modal */}
       <AnimatePresence>
-        {showRoomHall && (
-          <div className="fixed inset-0 z-[5000] flex items-center justify-center p-4">
+        {showSuccess && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[3000] pointer-events-none flex items-center justify-center overflow-hidden"
+          >
+            {[...Array(6)].map((_, i) => (
+              <motion.div
+                key={i}
+                initial={{ scale: 0, opacity: 0, rotate: i * 60 }}
+                animate={{
+                  scale: [0, 1.5, 1],
+                  opacity: [0, 1, 0],
+                  y: [0, -200],
+                  x: [0, (i % 2 === 0 ? 1 : -1) * 150]
+                }}
+                transition={{
+                  duration: 1.2,
+                  ease: "easeOut",
+                  delay: i * 0.05
+                }}
+                className="absolute"
+              >
+                <div className={cn(
+                  "w-6 h-6 rounded-full shadow-lg",
+                  i % 4 === 0 ? "bg-red-500" : i % 4 === 1 ? "bg-blue-500" : i % 4 === 2 ? "bg-emerald-500" : "bg-yellow-400"
+                )} />
+              </motion.div>
+            ))}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowRoomHall(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-zinc-900 border border-white/10 rounded-3xl p-8 w-full max-w-md shadow-2xl overflow-hidden"
+              initial={{ scale: 0, rotate: -10 }}
+              animate={{ scale: [0, 1.2, 1], rotate: 0 }}
+              className="bg-white/10 backdrop-blur-xl border-4 border-white/20 p-8 rounded-[40px] shadow-[0_0_100px_rgba(255,255,255,0.2)]"
             >
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-black italic tracking-tighter uppercase flex items-center gap-2">
-                  <Globe className="text-emerald-500" /> 游戏大厅
-                </h3>
-                <button
-                  onClick={() => setShowRoomHall(false)}
-                  className="p-2 hover:bg-white/10 rounded-full text-zinc-500 hover:text-white transition-all"
-                >
-                  <ArrowLeft size={20} />
-                </button>
-              </div>
-
-              {/* Quick Name Input & Create/Join Actions within Hall */}
-              <div className={cn(
-                "mb-6 flex flex-col gap-4 p-5 rounded-3xl border transition-all",
-                !playerName ? "bg-amber-500/5 border-amber-500/20 shadow-[0_0_20px_rgba(245,158,11,0.05)]" : "bg-zinc-800/30 border-white/5"
-              )}>
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className={cn(
-                      "text-xs font-black uppercase tracking-widest",
-                      !playerName ? "text-amber-500" : "text-zinc-400"
-                    )}>
-                      {!playerName ? "⚠️ 请先设置昵称" : "第一步：输入昵称"}
-                    </label>
-                    {playerName && <Check size={14} className="text-emerald-500" />}
-                  </div>
-                  <input
-                    type="text"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="输入你的名字..."
-                    className="w-full bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 focus:border-emerald-500/50 outline-none transition-all font-bold text-sm"
-                  />
-                </div>
-
-                <div className="pt-4 border-t border-white/5 flex flex-col gap-3">
-                  <label className="text-xs font-black uppercase tracking-widest text-zinc-400">第二步：加入或创建房间</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={inputRoomCode}
-                      onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
-                      placeholder="输入 6 位房间代码..."
-                      className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-sm"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!playerName || !inputRoomCode) return;
-                        joinRoom();
-                        setShowRoomHall(false);
-                      }}
-                      onMouseEnter={() => playSound('btnHover')}
-                      disabled={!playerName || !inputRoomCode}
-                      className="bg-zinc-700 text-white px-6 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-50 disabled:grayscale font-bold flex items-center gap-2"
-                    >
-                      <LogIn size={14} /> 加入
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">在线房间列表</span>
-              </div>
-              <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-2 custom-scrollbar">
-                {activeRooms.length === 0 ? (
-                  <div className="text-center py-12 text-zinc-500 italic">
-                    目前没有任何活动的房间...
-                  </div>
-                ) : (
-                  activeRooms.map((room: any) => (
-                    <div
-                      key={room.code}
-                      className={cn(
-                        "w-full flex items-center justify-between p-4 border rounded-2xl transition-all",
-                        room.status === 'playing' ? "bg-amber-500/5 border-amber-500/10" : "bg-zinc-800/50 border-white/5"
-                      )}
-                    >
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none">房间信息</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl font-black font-mono tracking-widest uppercase text-white">{room.code}</span>
-                          <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-zinc-400 whitespace-nowrap">房主: {room.hostName || '未知'}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
-                                <Users size={10} /> {room.playerCount}/10
-                              </span>
-                              {room.status === 'playing' ? (
-                                <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-amber-500/20">游戏中</span>
-                              ) : (
-                                <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-emerald-500/20">等待中</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          if (!playerName) {
-                            setShowRoomHall(false);
-                            playSound('click');
-                            return;
-                          }
-                          socketRef.current?.send(JSON.stringify({
-                            type: 'JOIN_ROOM',
-                            payload: { playerName, roomCode: room.code }
-                          }));
-                          setInputRoomCode(room.code);
-                          setShowRoomHall(false);
-                          playSound('click');
-                        }}
-                        className={cn(
-                          "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
-                          playerName
-                            ? (room.status === 'playing' ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
-                            : "bg-zinc-700 text-zinc-400 cursor-not-allowed"
-                        )}
-                        title={!playerName ? "请先输入昵称" : (room.status === 'playing' ? "点击观战" : "点击加入")}
-                      >
-                        {playerName ? (room.status === 'playing' ? '观战' : '加入') : '请输入昵称'}
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="mt-8 flex flex-col gap-3">
-                <button
-                  onClick={() => {
-                    if (!playerName) return;
-                    createRoom();
-                    setShowRoomHall(false);
-                  }}
-                  onMouseEnter={() => playSound('btnHover')}
-                  disabled={!playerName}
-                  className="w-full bg-emerald-500 text-white px-6 py-3 rounded-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale font-black flex items-center justify-center gap-2 shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
-                >
-                  <Plus size={18} /> 新建公开房间
-                </button>
-
-                <button
-                  onClick={() => {
-                    socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
-                    playSound('click');
-                  }}
-                  className="w-full py-3 bg-zinc-800 text-zinc-400 hover:text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                >
-                  <RefreshCw size={14} /> 刷新大厅
-                </button>
-              </div>
+              <h2 className="text-6xl font-black italic tracking-tighter text-white drop-shadow-2xl">
+                BOOM!
+              </h2>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
