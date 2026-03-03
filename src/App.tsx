@@ -108,7 +108,6 @@ export default function App() {
   const [hoveredGodModePlayerId, setHoveredGodModePlayerId] = useState<string | null>(null);
   const [activeRooms, setActiveRooms] = useState<{ code: string, playerCount: number }[]>([]);
   const [showRoomHall, setShowRoomHall] = useState(true);
-  const [showSuccess, setShowSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const lastPlayedCardIdRef = useRef<string | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -232,8 +231,7 @@ export default function App() {
     }
 
     if (isUltra) {
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2000);
+      // setShowSuccess removed
     }
   }, [triggerShake]);
 
@@ -268,8 +266,6 @@ export default function App() {
 
     if (gameState.players[gameState.currentPlayerIndex]?.isLocal) {
       playSound('win');
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
     } else {
       playSound('lose');
     }
@@ -462,6 +458,13 @@ export default function App() {
       }
     }
   }, [gameState.currentPlayerIndex, gameState.status]);
+
+  // Refresh room list when entering lobby/room hall
+  useEffect(() => {
+    if (gameState.status === 'lobby' && !gameState.roomCode && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
+    }
+  }, [gameState.status, gameState.roomCode]);
 
   const handleCardClick = (card: CardData) => {
     // Block interactions during overlay animations
@@ -1419,7 +1422,7 @@ export default function App() {
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             {(() => {
               return gameState.players.map((p, i) => {
-                const isViewingThis = p.id === actualViewingId;
+                const isViewingThis = p.id === displayedPlayer?.id;
                 if (isViewingThis) return null;
                 const playerCount = gameState.players.length;
                 const isLarge = playerCount > 6;
@@ -1472,65 +1475,118 @@ export default function App() {
                           onMouseEnter={() => seeAllHands && setHoveredGodModePlayerId(p.id)}
                           onMouseLeave={() => setHoveredGodModePlayerId(null)}
                           className={cn(
-                            "w-12 h-16 bg-zinc-800 rounded-lg border-2 border-zinc-700 flex flex-col items-center justify-center shadow-xl relative overflow-hidden transition-all",
-                            seeAllHands && "cursor-zoom-in hover:border-emerald-500/50 hover:scale-110"
+                            "relative w-16 h-16 flex items-center justify-center transition-all",
+                            seeAllHands && "cursor-zoom-in hover:scale-110"
                           )}
                         >
-                          {!isViewingThis && <span className="text-xs font-black">{p.hand.length}</span>}
-                          {seeAllHands && !isViewingThis && (
-                            <>
-                              <div className="absolute inset-0 bg-black/80 flex flex-wrap gap-0.5 p-1 items-center justify-center overflow-y-auto">
-                                {p.hand.map((c, i) => (
-                                  <div key={i} className={cn("w-1.5 h-2 rounded-[1px]",
-                                    c.color === 'red' ? 'bg-red-500' :
-                                      c.color === 'blue' ? 'bg-blue-500' :
-                                        c.color === 'green' ? 'bg-green-500' :
-                                          c.color === 'yellow' ? 'bg-yellow-400' : 'bg-white'
-                                  )} title={c.value} />
-                                ))}
-                              </div>
+                          {/* Avatar Circle with Glossy Effect */}
+                          <div className={cn(
+                            "w-full h-full rounded-full border-2 flex items-center justify-center relative overflow-hidden shadow-2xl transition-colors duration-500",
+                            gameState.currentPlayerIndex === i
+                              ? "bg-emerald-500/20 border-emerald-400 shadow-emerald-500/40"
+                              : "bg-zinc-900/80 border-white/10"
+                          )}>
+                            {/* Inner Shine */}
+                            <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
 
-                              {/* Detailed Hover Overlay */}
-                              <AnimatePresence>
-                                {hoveredGodModePlayerId === p.id && (
-                                  <motion.div
-                                    initial={{ opacity: 0, scale: 0.5, y: 10 }}
-                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                    exit={{ opacity: 0, scale: 0.5, y: 10 }}
-                                    className="absolute left-1/2 -bottom-2 translate-y-full -translate-x-1/2 z-[1000] bg-zinc-900 border border-white/20 p-2 rounded-xl shadow-2xl flex flex-wrap gap-1 min-w-[120px] max-w-[200px] justify-center pointer-events-none"
-                                  >
-                                    {p.hand.map((card, idx) => (
-                                      <div
-                                        key={card.id + idx}
-                                        className={cn(
-                                          "w-6 h-8 rounded-md border border-black/20 flex items-center justify-center text-[8px] font-black",
-                                          card.color === 'red' ? 'bg-red-500' :
-                                            card.color === 'blue' ? 'bg-blue-500' :
-                                              card.color === 'green' ? 'bg-green-500' :
-                                                card.color === 'yellow' ? 'bg-yellow-400' : 'bg-zinc-100 text-black'
-                                        )}
-                                      >
-                                        {card.value === 'draw2' ? '+2' :
-                                          card.value === 'draw4' ? '+4' :
-                                            card.value === 'skip' ? 'S' :
-                                              card.value === 'reverse' ? 'R' :
-                                                card.value === 'wild' ? 'W' : card.value}
-                                      </div>
-                                    ))}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </>
+                            {/* Bot Icon or First Letter */}
+                            {p.id.startsWith('ai-') ? (
+                              <Zap size={24} className={cn(
+                                "transition-colors",
+                                gameState.currentPlayerIndex === i ? "text-emerald-400" : "text-zinc-600"
+                              )} fill="currentColor" />
+                            ) : (
+                              <span className={cn(
+                                "text-xl font-black uppercase tracking-tighter transition-colors",
+                                gameState.currentPlayerIndex === i ? "text-white" : "text-zinc-500"
+                              )}>
+                                {p.name.charAt(0)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Card Count Badge (Styled as a small card) */}
+                          <motion.div
+                            initial={false}
+                            animate={{
+                              scale: gameState.currentPlayerIndex === i ? 1.1 : 1,
+                              y: gameState.currentPlayerIndex === i ? -4 : 0
+                            }}
+                            className={cn(
+                              "absolute -bottom-1 -right-1 min-w-[32px] h-10 bg-zinc-950 border-2 rounded-xl flex flex-col items-center justify-center shadow-2xl transition-all z-10",
+                              p.hand.length <= 2 ? "border-red-500 shadow-red-500/20" : "border-zinc-700"
+                            )}
+                          >
+                            <span className={cn(
+                              "text-[10px] font-black leading-none mb-0.5",
+                              p.hand.length <= 2 ? "text-red-500" : "text-zinc-500"
+                            )}>
+                              {p.hand.length}
+                            </span>
+                            <div className={cn(
+                              "w-3 h-0.5 rounded-full",
+                              p.hand.length <= 2 ? "bg-red-500" : "bg-zinc-800"
+                            )} />
+                          </motion.div>
+
+                          {seeAllHands && (
+                            <div className="absolute inset-0 bg-black/60 rounded-full flex flex-wrap gap-0.5 p-2 items-center justify-center overflow-hidden pointer-events-none">
+                              {p.hand.slice(0, 12).map((c, i) => (
+                                <div key={i} className={cn("w-1.5 h-2 rounded-[1px]",
+                                  c.color === 'red' ? 'bg-red-500' :
+                                    c.color === 'blue' ? 'bg-blue-500' :
+                                      c.color === 'green' ? 'bg-green-500' :
+                                        c.color === 'yellow' ? 'bg-yellow-400' : 'bg-white'
+                                )} />
+                              ))}
+                              {p.hand.length > 12 && <span className="text-[6px] text-zinc-500">...</span>}
+                            </div>
                           )}
+
+                          {/* God Mode Detailed Hover */}
+                          <AnimatePresence>
+                            {seeAllHands && hoveredGodModePlayerId === p.id && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.5, y: 10 }}
+                                className="absolute left-1/2 -bottom-2 translate-y-full -translate-x-1/2 z-[1000] bg-zinc-900/95 backdrop-blur-xl border border-white/20 p-2 rounded-xl shadow-2xl flex flex-wrap gap-1 min-w-[120px] max-w-[200px] justify-center pointer-events-none"
+                              >
+                                {p.hand.map((card, idx) => (
+                                  <div
+                                    key={card.id + idx}
+                                    className={cn(
+                                      "w-6 h-8 rounded-md border border-black/20 flex items-center justify-center text-[8px] font-black",
+                                      card.color === 'red' ? 'bg-red-500' :
+                                        card.color === 'blue' ? 'bg-blue-500' :
+                                          card.color === 'green' ? 'bg-green-500' :
+                                            card.color === 'yellow' ? 'bg-yellow-400' : 'bg-zinc-100 text-black'
+                                    )}
+                                  >
+                                    {card.value === 'draw2' ? '+2' :
+                                      card.value === 'draw4' ? '+4' :
+                                        card.value === 'skip' ? 'S' :
+                                          card.value === 'reverse' ? 'R' :
+                                            card.value === 'wild' ? 'W' : card.value}
+                                  </div>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                         {gameState.currentPlayerIndex === i && (
                           <motion.div
                             layoutId="active-indicator"
-                            className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full animate-pulse"
+                            className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full border-4 border-zinc-950 z-20"
                           />
                         )}
                       </div>
-                      {!isViewingThis && <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>}
+                      <span className={cn(
+                        "text-[10px] font-black uppercase tracking-[0.2em] transition-colors",
+                        gameState.currentPlayerIndex === i ? "text-emerald-400" : "text-zinc-500"
+                      )}>
+                        {p.name}
+                      </span>
                     </motion.div>
                   </div>
                 );
@@ -1976,7 +2032,7 @@ export default function App() {
 
             <div className="flex flex-col items-center gap-4 mt-16 w-full">
               <button
-                onClick={() => setGameState(prev => ({ ...prev, status: 'lobby', roomCode: '' }))}
+                onClick={leaveGame}
                 className="text-zinc-500 font-bold hover:text-white transition-colors text-xs uppercase tracking-widest"
               >
                 返回主菜单
@@ -1994,49 +2050,6 @@ export default function App() {
       {(gameState.status === 'playing' || gameState.status === 'ended') && renderGame()}
       {gameState.status === 'ended' && renderEnd()}
 
-      <AnimatePresence>
-        {showSuccess && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[3000] pointer-events-none flex items-center justify-center overflow-hidden"
-          >
-            {[...Array(6)].map((_, i) => (
-              <motion.div
-                key={i}
-                initial={{ scale: 0, opacity: 0, rotate: i * 60 }}
-                animate={{
-                  scale: [0, 1.5, 1],
-                  opacity: [0, 1, 0],
-                  y: [0, -200],
-                  x: [0, (i % 2 === 0 ? 1 : -1) * 150]
-                }}
-                transition={{
-                  duration: 1.2,
-                  ease: "easeOut",
-                  delay: i * 0.05
-                }}
-                className="absolute"
-              >
-                <div className={cn(
-                  "w-6 h-6 rounded-full shadow-lg",
-                  i % 4 === 0 ? "bg-red-500" : i % 4 === 1 ? "bg-blue-500" : i % 4 === 2 ? "bg-emerald-500" : "bg-yellow-400"
-                )} />
-              </motion.div>
-            ))}
-            <motion.div
-              initial={{ scale: 0, rotate: -10 }}
-              animate={{ scale: [0, 1.2, 1], rotate: 0 }}
-              className="bg-white/10 backdrop-blur-xl border-4 border-white/20 p-8 rounded-[40px] shadow-[0_0_100px_rgba(255,255,255,0.2)]"
-            >
-              <h2 className="text-6xl font-black italic tracking-tighter text-white drop-shadow-2xl">
-                BOOM!
-              </h2>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

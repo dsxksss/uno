@@ -89,8 +89,12 @@ func (r *Room) Run() {
 
 func (r *Room) UpdateState() {
 	r.Mutex.Lock()
-	state := r.State
+	r.updateStateLocked()
 	r.Mutex.Unlock()
+}
+
+func (r *Room) updateStateLocked() {
+	state := r.State
 
 	// Create actual state message
 	type StatePayload struct {
@@ -141,6 +145,17 @@ func (r *Room) cleanupIfAbandoned() {
 
 	if !hasHuman || len(r.Clients) == 0 {
 		if _, exists := rooms[r.Code]; exists {
+			log.Printf("Room %s closing: no human players left or no connections\n", r.Code)
+			
+			// Set status and update others before closing
+			r.State.Status = Ended
+			// We unlock to call UpdateState which might need the lock (though UpdateState handles its own locking)
+			// Wait, r.Mutex is already locked here. UpdateState ALSO locks r.Mutex.
+			// This would DEADLOCK!
+			
+			// We need to call a version of UpdateState that doesn't lock
+			r.updateStateLocked()
+
 			delete(rooms, r.Code)
 			
 			// Use a select to close the Stop channel only once if it exists
@@ -150,9 +165,6 @@ func (r *Room) cleanupIfAbandoned() {
 			default:
 				close(r.Stop) // Stop the Run goroutine
 			}
-			
-			log.Printf("Room %s closed: no human players left or no connections\n", r.Code)
-			r.State.Status = Ended
 		}
 	}
 }

@@ -92,8 +92,8 @@ func (r *Room) StartTimer() {
 		if r.State.TimeLeft <= 0 {
 			r.AutoMove()
 		}
+		r.updateStateLocked()
 		r.Mutex.Unlock()
-		r.UpdateState()
 	}
 }
 
@@ -397,22 +397,80 @@ func (r *Room) UpdateAISettings(playerID string, aiCount int, difficulty Difficu
 }
 
 func (r *Room) RemovePlayer(playerID string) {
-	newPlayers := []Player{}
+	playerIndex := -1
+	for i, p := range r.State.Players {
+		if p.ID == playerID {
+			playerIndex = i
+			break
+		}
+	}
+
 	found := false
 	var leftPlayerName string
 	var leftPlayerHand []CardData
 
-	for _, p := range r.State.Players {
-		if p.ID == playerID {
-			found = true
-			leftPlayerName = p.Name
-			leftPlayerHand = p.Hand
-			continue
-		}
-		newPlayers = append(newPlayers, p)
-	}
+	if playerIndex != -1 {
+		found = true
+		leftPlayerName = r.State.Players[playerIndex].Name
+		leftPlayerHand = r.State.Players[playerIndex].Hand
 
-	r.State.Players = newPlayers
+		// Remove from slice
+		r.State.Players = append(r.State.Players[:playerIndex], r.State.Players[playerIndex+1:]...)
+
+		if r.State.Status == Playing {
+			if len(r.State.Players) <= 1 {
+				if len(r.State.Players) == 1 {
+					r.State.Winner = r.State.Players[0].Name
+				}
+				r.State.Status = Ended
+				return
+			}
+
+			// Adjust CurrentPlayerIndex
+			if playerIndex < r.State.CurrentPlayerIndex {
+				r.State.CurrentPlayerIndex--
+			} else if r.State.CurrentPlayerIndex >= len(r.State.Players) {
+				r.State.CurrentPlayerIndex = 0
+			}
+
+			// Handle PendingWildColorPlayerIndex
+			if r.State.PendingWildColorPlayerIndex != nil {
+				pendingIdx := *r.State.PendingWildColorPlayerIndex
+				if playerIndex == pendingIdx {
+					// The person choosing color left. Clear it and move to next player.
+					r.State.PendingWildColorPlayerIndex = nil
+					r.State.TimeLeft = 30
+					// CurrentPlayerIndex is already at 'pendingIdx' (since we were waiting for them)
+					// No further adjustment needed, CheckAI will take over for the person now at this index.
+				} else if playerIndex < pendingIdx {
+					newPendingIdx := pendingIdx - 1
+					r.State.PendingWildColorPlayerIndex = &newPendingIdx
+				}
+			}
+
+			// Reshuffle the leaving player's cards into the deck
+			if len(leftPlayerHand) > 0 {
+				r.State.Deck = append(r.State.Deck, leftPlayerHand...)
+				r.State.Deck = Shuffle(r.State.Deck)
+			}
+
+			// Show notification
+			r.State.PlayerLeftMessage = fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName)
+			messageID := fmt.Sprintf("left-%d", time.Now().UnixNano())
+			r.State.PendingUnoPlayerID = messageID // Reuse this field or similar for temporary message? No, better just timeout.
+			
+			// We already have the notification timer below
+			time.AfterFunc(3*time.Second, func() {
+				r.Mutex.Lock()
+				// Only clear if no one else left meanwhile (best effort)
+				if r.State.PlayerLeftMessage == fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName) {
+					r.State.PlayerLeftMessage = ""
+				}
+				r.Mutex.Unlock()
+				r.UpdateState()
+			})
+		}
+	}
 
 	// Also check spectators
 	newSpectators := []Player{}
@@ -429,34 +487,43 @@ func (r *Room) RemovePlayer(playerID string) {
 		return
 	}
 
-	// If game was playing, we might need to adjust CurrentPlayerIndex
-	if r.State.Status == Playing {
-		if len(newPlayers) <= 1 {
-			if len(newPlayers) == 1 {
-				r.State.Winner = newPlayers[0].Name
+	// Ensure Host priority: If players[0] is AI but there are humans, swap
+	if len(r.State.Players) > 0 && !startsWith(r.State.Players[0].ID, "ai-") {
+		// Already a human host
+	} else if len(r.State.Players) > 1 {
+		for i := 1; i < len(r.State.Players); i++ {
+			if startsWith(r.State.Players[i].ID, "ai-") {
+				continue
 			}
-			r.State.Status = Ended
-			return
+			// Found a human, swap to host
+			r.State.Players[0], r.State.Players[i] = r.State.Players[i], r.State.Players[0]
+			
+			// If playing, we must also adjust CurrentPlayerIndex to follow the player!
+			if r.State.Status == Playing {
+				if r.State.CurrentPlayerIndex == 0 {
+					r.State.CurrentPlayerIndex = i
+				} else if r.State.CurrentPlayerIndex == i {
+					r.State.CurrentPlayerIndex = 0
+				}
+				// Also adjust pendingWildColorPlayerIndex if it was these players
+				if r.State.PendingWildColorPlayerIndex != nil {
+					idx := *r.State.PendingWildColorPlayerIndex
+					if idx == 0 {
+						newIdx := i
+						r.State.PendingWildColorPlayerIndex = &newIdx
+					} else if idx == i {
+						newIdx := 0
+						r.State.PendingWildColorPlayerIndex = &newIdx
+					}
+				}
+			}
+			break
 		}
+	}
 
-		// Reshuffle the leaving player's cards into the deck
-		if len(leftPlayerHand) > 0 {
-			r.State.Deck = append(r.State.Deck, leftPlayerHand...)
-			r.State.Deck = Shuffle(r.State.Deck)
-		}
-
-		// Show notification
-		r.State.PlayerLeftMessage = fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName)
-		time.AfterFunc(3*time.Second, func() {
-			r.Mutex.Lock()
-			r.State.PlayerLeftMessage = ""
-			r.Mutex.Unlock()
-			r.UpdateState()
-		})
-
-		if r.State.CurrentPlayerIndex >= len(newPlayers) {
-			r.State.CurrentPlayerIndex = 0
-		}
+	// Trigger AI if it's their turn now
+	if r.State.Status == Playing {
+		r.CheckAI()
 	}
 }
 
@@ -491,7 +558,7 @@ func (r *Room) CheckAI() {
 					// 80% chance to shout UNO
 					if rand.Float32() < 0.8 {
 						r.ShoutUno(pID)
-						r.UpdateState()
+						r.updateStateLocked()
 					}
 				}
 			})
@@ -528,7 +595,7 @@ func (r *Room) CheckAI() {
 						if count > counts[maxIdx] { maxIdx = i }
 					}
 					r.ChooseColor(pID, colors[maxIdx])
-					r.UpdateState()
+					r.updateStateLocked()
 				}
 			})
 			return
@@ -628,7 +695,7 @@ func (r *Room) CheckAI() {
 		} else {
 			r.DrawCard(pID)
 		}
-		r.UpdateState()
+		r.updateStateLocked()
 	})
 }
 
