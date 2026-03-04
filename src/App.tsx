@@ -117,6 +117,7 @@ export default function App() {
   const [clientId, setClientId] = useState<string | null>(null);
   const [ripples, setRipples] = useState<{ id: string, color: string, x: number, y: number, scale: number, thickness: number }[]>([]);
   const [actionBubble, setActionBubble] = useState<{ text: string, color: string } | null>(null);
+  const [actionFlash, setActionFlash] = useState<{ color: string, type: string, text: string } | null>(null);
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
   const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
   const isSpectator = gameState.spectators.some(s => s.isLocal);
@@ -325,11 +326,24 @@ export default function App() {
     }, 2500);
 
     if (isSpecial) {
-      setTimeout(() => setActionBubble(null), 1200);
+      const texts: Record<string, string> = {
+        'draw2': 'PUNISH +2!',
+        'draw4': 'ULTIMATE +4!!',
+        'skip': 'STOP!',
+        'reverse': 'REVERSE!',
+        'wild': 'COLOR SHIFT'
+      };
+
+      setActionFlash({
+        color: color === 'yellow' ? '#facc15' : color === 'red' ? '#ef4444' : color === 'blue' ? '#3b82f6' : color === 'green' ? '#10b981' : '#a855f7',
+        type: value,
+        text: texts[value] || 'ACTION!'
+      });
+      setTimeout(() => setActionFlash(null), 800);
     }
 
     if (isUltra) {
-      // setShowSuccess removed
+      // Additional effects for +4 could go here
     }
   }, [triggerShake]);
 
@@ -1251,10 +1265,117 @@ export default function App() {
               )}
             </AnimatePresence>
 
-            {/* Background Effects */}
-            <div className="absolute inset-0 opacity-20 pointer-events-none">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-emerald-500/20 rounded-full blur-[120px]" />
-              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10" />
+            {/* Action Flash & Power Surge Overlay */}
+            <AnimatePresence>
+              {actionFlash && (
+                <motion.div
+                  className="fixed inset-0 z-[400] pointer-events-none flex items-center justify-center overflow-hidden"
+                >
+                  {/* Full Screen Impact Flash */}
+                  <motion.div
+                    initial={{ opacity: 0, scale: 1.2 }}
+                    animate={{ opacity: [0, 0.4, 0], scale: 1 }}
+                    transition={{ duration: 0.6 }}
+                    className="absolute inset-0"
+                    style={{ backgroundColor: actionFlash.color }}
+                  />
+
+                  {/* Impact Text Burst */}
+                  <div className="relative">
+                    <motion.div
+                      initial={{ scale: 0, opacity: 0, rotate: -15 }}
+                      animate={{
+                        scale: [0, 1.5, 1],
+                        opacity: [0, 1, 1],
+                        rotate: [-15, 0, 0]
+                      }}
+                      exit={{ scale: 2, opacity: 0, y: -50 }}
+                      className="relative z-10"
+                    >
+                      <h2 className="text-8xl font-black italic tracking-tighter text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] transform -skew-x-12">
+                        {actionFlash.text}
+                      </h2>
+                    </motion.div>
+
+                    {/* Secondary Shockwave Circle */}
+                    <motion.div
+                      initial={{ scale: 0, opacity: 1 }}
+                      animate={{ scale: 6, opacity: 0 }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full border-[20px]"
+                      style={{ borderColor: actionFlash.color }}
+                    />
+                  </div>
+
+                  {/* Radial Vignette Distortion Pulse */}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0, 0.7, 0] }}
+                    transition={{ duration: 0.8 }}
+                    className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_20%,rgba(0,0,0,0.8)_100%)]"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Optimized Background Components */}
+            <div className="absolute inset-0 z-[0] pointer-events-none overflow-hidden">
+              {/* Main Ambient Glow - Reacts to game state */}
+              <motion.div
+                animate={{
+                  backgroundColor:
+                    gameState.currentWildColor === 'red' ? 'rgba(239, 68, 68, 0.15)' :
+                      gameState.currentWildColor === 'blue' ? 'rgba(59, 130, 246, 0.15)' :
+                        gameState.currentWildColor === 'green' ? 'rgba(16, 185, 129, 0.15)' :
+                          gameState.currentWildColor === 'yellow' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.08)'
+                }}
+                className="absolute inset-0 transition-colors duration-1000"
+              />
+
+              {/* Animated Floating Bokeh Elements for Depth */}
+              <div className="absolute inset-0 opacity-40">
+                {[...Array(5)].map((_, i) => (
+                  <motion.div
+                    key={i}
+                    animate={{
+                      x: [0, 80, -40, 0],
+                      y: [0, -60, 40, 0],
+                      scale: [1, 1.3, 0.9, 1],
+                      rotate: [0, 45, -45, 0]
+                    }}
+                    transition={{
+                      duration: 15 + i * 5,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                    className="absolute rounded-full blur-[120px]"
+                    style={{
+                      width: `${400 + i * 100}px`,
+                      height: `${400 + i * 100}px`,
+                      left: `${-10 + i * 25}%`,
+                      top: `${-10 + (i % 3) * 30}%`,
+                      backgroundColor: i % 3 === 0 ? 'rgba(16, 185, 129, 0.15)' :
+                        i % 3 === 1 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.1)'
+                    }}
+                  />
+                ))}
+              </div>
+
+              {/* Sophisticated Dot Grid Overlay */}
+              <div
+                className="absolute inset-0 opacity-[0.07]"
+                style={{
+                  backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.8) 1.5px, transparent 0)`,
+                  backgroundSize: '48px 48px'
+                }}
+              />
+
+              {/* Dynamic Radial Vignette */}
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.6)_100%)]" />
+
+              {/* Center Board Highlight - Focuses attention on cards */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[700px] bg-white/[0.01] rounded-[150px] blur-[100px] border border-white/[0.05]" />
             </div>
 
             {/* Water Ripples Layer */}
@@ -1263,11 +1384,11 @@ export default function App() {
                 {ripples.map(ripple => (
                   <motion.div
                     key={ripple.id}
-                    initial={{ scale: 0, opacity: 0.6 }}
+                    initial={{ scale: 0, opacity: 0.8 }}
                     animate={{ scale: ripple.scale, opacity: 0 }}
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 1.5, ease: "easeOut" }}
-                    className="absolute rounded-full border-2 border-white/20"
+                    transition={{ duration: 1.8, ease: "easeOut" }}
+                    className="absolute rounded-full border-[3px]"
                     style={{
                       left: `${ripple.x}%`,
                       top: `${ripple.y}%`,
@@ -1275,7 +1396,16 @@ export default function App() {
                       height: '600px',
                       marginLeft: '-300px',
                       marginTop: '-300px',
-                      borderColor: ripple.color === 'yellow' ? '#fbbf24' : ripple.color === 'red' ? '#ef4444' : ripple.color === 'blue' ? '#3b82f6' : ripple.color === 'green' ? '#10b981' : '#ffffff'
+                      borderColor:
+                        ripple.color === 'yellow' ? '#facc15' :
+                          ripple.color === 'red' ? '#ef4444' :
+                            ripple.color === 'blue' ? '#3b82f6' :
+                              ripple.color === 'green' ? '#10b981' : '#ffffff',
+                      boxShadow: `0 0 20px ${ripple.color === 'yellow' ? 'rgba(250, 204, 21, 0.3)' :
+                        ripple.color === 'red' ? 'rgba(239, 68, 68, 0.3)' :
+                          ripple.color === 'blue' ? 'rgba(59, 130, 246, 0.3)' :
+                            ripple.color === 'green' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.1)'
+                        }`
                     }}
                   />
                 ))}
