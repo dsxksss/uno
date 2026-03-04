@@ -1320,14 +1320,19 @@ export default function App() {
 
             {/* Optimized Background Components */}
             <div className="absolute inset-0 z-[0] pointer-events-none overflow-hidden">
-              {/* Main Ambient Glow - Reacts to game state */}
+              {/* Main Ambient Glow - Reacts to current card color or wild color */}
               <motion.div
                 animate={{
-                  backgroundColor:
-                    gameState.currentWildColor === 'red' ? 'rgba(239, 68, 68, 0.15)' :
-                      gameState.currentWildColor === 'blue' ? 'rgba(59, 130, 246, 0.15)' :
-                        gameState.currentWildColor === 'green' ? 'rgba(16, 185, 129, 0.15)' :
-                          gameState.currentWildColor === 'yellow' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.08)'
+                  backgroundColor: (() => {
+                    const topColor = gameState.currentWildColor || (gameState.discardPile.length > 0 ? gameState.discardPile[gameState.discardPile.length - 1].color : null);
+                    switch (topColor) {
+                      case 'red': return 'rgba(239, 68, 68, 0.18)';
+                      case 'blue': return 'rgba(59, 130, 246, 0.18)';
+                      case 'green': return 'rgba(16, 185, 129, 0.18)';
+                      case 'yellow': return 'rgba(251, 191, 36, 0.18)';
+                      default: return 'rgba(16, 185, 129, 0.08)';
+                    }
+                  })()
                 }}
                 className="absolute inset-0 transition-colors duration-1000"
               />
