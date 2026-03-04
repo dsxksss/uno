@@ -178,6 +178,11 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 		}
 	}
 
+	// Rule: Cannot win with an action card
+	if len(player.Hand) == 1 && !IsNumberCard(card) {
+		return
+	}
+
 	player.Hand = append(player.Hand[:cardIndex], player.Hand[cardIndex+1:]...)
 	player.HasShoutedUno = false
 	r.State.DiscardPile = append(r.State.DiscardPile, card)
@@ -260,6 +265,7 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 			}
 			r.Mutex.Unlock()
 			r.UpdateState()
+			r.CheckAI()
 		})
 	}
 
@@ -336,6 +342,7 @@ func (r *Room) ShoutUno(playerID string) {
 			}
 		}
 	}
+	r.CheckAI()
 }
 
 func (r *Room) ChooseColor(playerID string, color CardColor) {
@@ -571,7 +578,7 @@ func (r *Room) CheckAI() {
 					}
 				}
 			})
-			return
+			// Do not return! Let it continue to Choosing Color or Normal Turn
 		}
 	}
 
@@ -651,8 +658,13 @@ func (r *Room) CheckAI() {
 		
 		var playableCardID string
 		playableCards := []CardData{}
+		isLastCard := len(r.State.Players[r.State.CurrentPlayerIndex].Hand) == 1
 		for _, card := range r.State.Players[r.State.CurrentPlayerIndex].Hand {
 			if CanPlayCard(card, topCard, r.State.DrawStack, r.State.CurrentWildColor, lastNum) {
+				// Rule: Cannot win with an action card
+				if isLastCard && !IsNumberCard(card) {
+					continue
+				}
 				playableCards = append(playableCards, card)
 			}
 		}

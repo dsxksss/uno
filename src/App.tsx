@@ -130,12 +130,27 @@ export default function App() {
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
 
   const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.warn(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else if (document.exitFullscreen) {
-      document.exitFullscreen();
+    const doc = document as any;
+    const docEl = document.documentElement as any;
+
+    const isFull = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+
+    if (!isFull) {
+      const requestFullscreen = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+      if (requestFullscreen) {
+        requestFullscreen.call(docEl).catch((err: any) => {
+          console.warn(`Error attempting to enable fullscreen: ${err.message}`);
+        });
+      } else {
+        // Fallback for iOS iPhone where Fullscreen API for elements isn't supported
+        // Suggesting "Add to Home Screen" is often the only real way there
+        alert("此浏览器不支持全屏 API。在 iPhone 上，请使用 Safari 的 '添加到主屏幕' 功能以获得全屏体验。");
+      }
+    } else {
+      const exitFullscreen = doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen || doc.msExitFullscreen;
+      if (exitFullscreen) {
+        exitFullscreen.call(doc);
+      }
     }
   }, []);
 
@@ -166,13 +181,16 @@ export default function App() {
         document.documentElement.style.setProperty('--canvas-height', '100vh');
       }
 
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc = document as any;
+      setIsFullscreen(!!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement));
     };
 
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc = document as any;
+      const isFull = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+      setIsFullscreen(isFull);
       // Auto hide prompt if they entered fullscreen
-      if (document.fullscreenElement) {
+      if (isFull) {
         setShowFullscreenPrompt(false);
       }
     };
@@ -180,10 +198,13 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('msfullscreenchange', handleFullscreenChange);
 
     // Initial check for mobile to show prompt
     const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (isTouch && !document.fullscreenElement) {
+    if (isTouch && !document.fullscreenElement && !(document as any).webkitFullscreenElement) {
       // Delay prompt slightly to ensure layout is settled
       setTimeout(() => setShowFullscreenPrompt(true), 1500);
     }
@@ -192,6 +213,9 @@ export default function App() {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('msfullscreenchange', handleFullscreenChange);
     };
   }, []);
 
@@ -561,6 +585,11 @@ export default function App() {
 
     // Normal play selection
     if (isLocalTurn && !isPendingColor && canPlayCard(card, topCard, drawStack, currentWildColor, lastNumberValue)) {
+      // Rule: Cannot win with an action card
+      if (me.hand.length === 1 && !isNumberCard(card)) {
+        return;
+      }
+
       if (selectedCardId === card.id) {
         setSelectedCardId(null);
       } else {
