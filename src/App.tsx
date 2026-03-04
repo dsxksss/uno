@@ -334,10 +334,13 @@ export default function App() {
         'wild': 'COLOR SHIFT'
       };
 
+      // Suppress text if a specialized overlay is about to show
+      const hasSpecialOverlay = value === 'reverse' || !!gameState.jumpInPlayerId;
+
       setActionFlash({
         color: color === 'yellow' ? '#facc15' : color === 'red' ? '#ef4444' : color === 'blue' ? '#3b82f6' : color === 'green' ? '#10b981' : '#a855f7',
         type: value,
-        text: texts[value] || 'ACTION!'
+        text: hasSpecialOverlay ? '' : (texts[value] || 'ACTION!')
       });
       setTimeout(() => setActionFlash(null), 800);
     }
@@ -1280,32 +1283,34 @@ export default function App() {
                     style={{ backgroundColor: actionFlash.color }}
                   />
 
-                  {/* Impact Text Burst */}
-                  <div className="relative">
-                    <motion.div
-                      initial={{ scale: 0, opacity: 0, rotate: -15 }}
-                      animate={{
-                        scale: [0, 1.5, 1],
-                        opacity: [0, 1, 1],
-                        rotate: [-15, 0, 0]
-                      }}
-                      exit={{ scale: 2, opacity: 0, y: -50 }}
-                      className="relative z-10"
-                    >
-                      <h2 className="text-8xl font-black italic tracking-tighter text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] transform -skew-x-12">
-                        {actionFlash.text}
-                      </h2>
-                    </motion.div>
+                  {/* Impact Text Burst - Only show if not empty */}
+                  {actionFlash.text && (
+                    <div className="relative">
+                      <motion.div
+                        initial={{ scale: 0, opacity: 0, rotate: -15 }}
+                        animate={{
+                          scale: [0, 1.8, 1],
+                          opacity: [0, 1, 1],
+                          rotate: [-15, 0, 0]
+                        }}
+                        exit={{ scale: 3, opacity: 0, y: -100 }}
+                        className="relative z-10"
+                      >
+                        <h2 className="text-8xl font-black italic tracking-tighter text-white stroke-black stroke-2 drop-shadow-[0_20px_50px_rgba(0,0,0,0.8)] transform -skew-x-12 px-4 py-2 border-y-8 border-white">
+                          {actionFlash.text}
+                        </h2>
+                      </motion.div>
 
-                    {/* Secondary Shockwave Circle */}
-                    <motion.div
-                      initial={{ scale: 0, opacity: 1 }}
-                      animate={{ scale: 6, opacity: 0 }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
-                      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full border-[20px]"
-                      style={{ borderColor: actionFlash.color }}
-                    />
-                  </div>
+                      {/* Secondary Shockwave Circle */}
+                      <motion.div
+                        initial={{ scale: 0, opacity: 1 }}
+                        animate={{ scale: 6, opacity: 0 }}
+                        transition={{ duration: 0.8, ease: "easeOut" }}
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full border-[20px]"
+                        style={{ borderColor: actionFlash.color }}
+                      />
+                    </div>
+                  )}
 
                   {/* Radial Vignette Distortion Pulse */}
                   <motion.div
