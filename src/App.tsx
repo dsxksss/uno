@@ -707,7 +707,7 @@ export default function App() {
                     )}>
                       <div className="flex items-center justify-between mb-2">
                         <label className={cn(
-                          "text-xs font-black uppercase tracking-widest",
+                          "text-base font-black uppercase tracking-widest",
                           !playerName ? "text-amber-500" : "text-zinc-400"
                         )}>
                           {!playerName ? "⚠️ 请先设置昵称" : "第一步：输入昵称"}
@@ -718,27 +718,27 @@ export default function App() {
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
                         placeholder="输入你的名字..."
-                        className="w-full bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 focus:border-emerald-500/50 outline-none transition-all font-bold text-sm"
+                        className="w-full bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 focus:border-emerald-500/50 outline-none transition-all font-bold text-base"
                       />
                     </div>
 
                     {/* 房间列表区 */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between px-1">
-                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Globe size={12} className="text-emerald-500" /> 在线房间列表
+                        <span className="text-base font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Globe size={16} className="text-emerald-500" /> 在线房间列表
                         </span>
                         <button
                           onClick={() => socketRef.current?.send(JSON.stringify({ type: 'GET_ROOM_LIST' }))}
-                          className="text-[10px] text-zinc-500 hover:text-white transition-all flex items-center gap-1"
+                          className="text-base text-zinc-500 hover:text-white transition-all flex items-center gap-2 font-black uppercase tracking-widest bg-zinc-800/50 px-4 py-2 rounded-xl border border-white/5 active:scale-95"
                         >
-                          <RefreshCw size={10} /> 刷新
+                          <RefreshCw size={14} /> 刷新
                         </button>
                       </div>
 
                       <div className="space-y-3 max-h-[360px] lg:max-h-[480px] overflow-y-auto pr-2 custom-scrollbar">
                         {activeRooms.length === 0 ? (
-                          <div className="text-center py-10 bg-zinc-900/30 rounded-2xl border border-dashed border-white/5 text-zinc-500 text-xs italic">
+                          <div className="text-center py-10 bg-zinc-900/30 rounded-2xl border border-dashed border-white/5 text-zinc-500 text-sm italic">
                             目前没有任何可加入的房间...
                           </div>
                         ) : (
@@ -754,15 +754,15 @@ export default function App() {
                                 <div className="flex items-center gap-3">
                                   <span className="text-xl font-black font-mono tracking-widest uppercase text-white">{room.code}</span>
                                   <div className="flex flex-col">
-                                    <span className="text-[10px] font-bold text-zinc-400">房主: {room.hostName || '未知'}</span>
+                                    <span className="text-[12px] font-bold text-zinc-400">房主: {room.hostName || '未知'}</span>
                                     <div className="flex items-center gap-2 mt-0.5">
-                                      <span className="text-[10px] font-bold text-emerald-500/80 flex items-center gap-1">
+                                      <span className="text-[12px] font-bold text-emerald-500/80 flex items-center gap-1">
                                         <Users size={10} /> {room.playerCount}/10
                                       </span>
                                       {room.status === 'playing' ? (
-                                        <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-amber-500/20">游戏中</span>
+                                        <span className="text-[12px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-md font-black uppercase tracking-tighter border border-amber-500/20">游戏中</span>
                                       ) : (
-                                        <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter border border-emerald-500/20">等待中</span>
+                                        <span className="text-[12px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-md font-black uppercase tracking-tighter border border-emerald-500/20">等待中</span>
                                       )}
                                     </div>
                                   </div>
@@ -779,7 +779,7 @@ export default function App() {
                                   playSound('click');
                                 }}
                                 className={cn(
-                                  "px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                                  "px-6 py-3 rounded-xl text-base font-black uppercase tracking-widest transition-all",
                                   playerName
                                     ? (room.status === 'playing' || room.playerCount >= 10 ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
                                     : "bg-zinc-800 text-zinc-600 grayscale cursor-not-allowed border border-white/5"
@@ -801,7 +801,7 @@ export default function App() {
                           value={inputRoomCode}
                           onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
                           placeholder="自定义房间代码..."
-                          className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-sm"
+                          className="flex-1 bg-zinc-900 border-2 border-zinc-700/50 rounded-xl px-4 py-3 font-mono tracking-widest focus:border-emerald-500/50 outline-none transition-all text-base"
                         />
                         <button
                           onClick={() => {
@@ -810,7 +810,7 @@ export default function App() {
                           }}
                           onMouseEnter={() => playSound('btnHover')}
                           disabled={!playerName || !inputRoomCode}
-                          className="bg-zinc-700 text-white px-6 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-30 font-bold flex items-center gap-2 whitespace-nowrap"
+                          className="bg-zinc-700 text-white px-6 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-30 font-bold flex items-center gap-2 whitespace-nowrap text-base py-3"
                         >
                           <Plus size={14} /> 加入私房
                         </button>
@@ -823,7 +823,7 @@ export default function App() {
                         }}
                         onMouseEnter={() => playSound('btnHover')}
                         disabled={!playerName}
-                        className="w-full bg-emerald-500 text-white px-6 py-4 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 font-black flex items-center justify-center gap-2 shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
+                        className="w-full bg-emerald-500 text-white px-6 py-5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 font-black flex items-center justify-center gap-2 shadow-[0_10px_30px_rgba(16,185,129,0.2)] text-base"
                       >
                         <Plus size={18} /> 创建新房间
                       </button>
@@ -833,7 +833,7 @@ export default function App() {
               ) : (
                 <div className="space-y-4">
                   <div className="text-center relative group">
-                    <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">房间代码</p>
+                    <p className="text-sm font-bold uppercase tracking-widest text-zinc-500 mb-2">房间代码</p>
                     <div className="flex items-center justify-center gap-3">
                       <h2 className="text-5xl font-black tracking-widest font-mono select-all">{gameState.roomCode}</h2>
                       <button
@@ -885,8 +885,8 @@ export default function App() {
 
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-                        <Users size={14} /> 玩家 ({gameState.players.length}/10)
+                      <p className="text-sm font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                        <Users size={16} /> 玩家 ({gameState.players.length}/10)
                       </p>
                       {isHost && (
                         <div className="flex items-center gap-2 bg-zinc-800/80 p-1 rounded-lg border border-white/5">
@@ -910,7 +910,7 @@ export default function App() {
                           >
                             -
                           </button>
-                          <span className="text-xs font-black min-w-[2ch] text-center">{aiCount}</span>
+                          <span className="text-sm font-black min-w-[2ch] text-center">{aiCount}</span>
                           <button
                             onClick={() => {
                               const humansCount = gameState.players.filter(p => !p.id.startsWith('ai-')).length;
@@ -938,7 +938,7 @@ export default function App() {
 
                     {isHost && aiCount > 0 && (
                       <div className="flex items-center justify-between bg-zinc-900/40 p-3 rounded-xl border border-white/5">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                        <p className="text-[12px] font-black uppercase tracking-widest text-zinc-500">
                           全场 AI 难度
                         </p>
                         <div className="flex bg-zinc-800/80 p-1 rounded-lg border border-white/5">
@@ -955,7 +955,7 @@ export default function App() {
                                 }));
                               }}
                               className={cn(
-                                "px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-tighter transition-all",
+                                "px-3 py-1.5 rounded-md text-[12px] font-black uppercase tracking-tighter transition-all",
                                 !isHost && "pointer-events-none opacity-50",
                                 aiDifficulty === d
                                   ? (d === 'hard' ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]" : "bg-white text-black shadow-lg")
@@ -977,9 +977,9 @@ export default function App() {
                           className="flex items-center justify-between bg-zinc-800/50 p-2.5 rounded-xl border border-white/5"
                         >
                           <div className="flex items-center gap-2">
-                            <span className="font-bold">{p.name}</span>
-                            {p.isLocal && <span className="text-[10px] text-zinc-500 font-bold">(你)</span>}
-                            {index === 0 && <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">房主</span>}
+                            <span className="font-bold text-base">{p.name}</span>
+                            {p.isLocal && <span className="text-[12px] text-zinc-500 font-bold">(你)</span>}
+                            {index === 0 && <span className="text-[12px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">房主</span>}
                           </div>
                           <div className="flex items-center gap-2">
                             {/* Only host can kick others */}
@@ -1003,9 +1003,9 @@ export default function App() {
                           className="flex items-center justify-between bg-zinc-900/40 p-3 rounded-xl border border-dashed border-white/10"
                         >
                           <div className="flex items-center gap-2">
-                            <span className="text-zinc-500 font-bold">{p.name}</span>
-                            {p.isLocal && <span className="text-[10px] text-zinc-500 font-bold">(你)</span>}
-                            <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">观战中</span>
+                            <span className="text-zinc-500 font-bold text-base">{p.name}</span>
+                            {p.isLocal && <span className="text-[12px] text-zinc-500 font-bold">(你)</span>}
+                            <span className="text-[12px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">观战中</span>
                           </div>
                           <div className="flex items-center gap-2">
                             {/* Only host can kick others */}
@@ -1037,8 +1037,7 @@ export default function App() {
                       disabled={!isHost || gameState.players.length < 2}
                       onMouseEnter={() => playSound('btnHover')}
                       className={cn(
-                        "flex-[2] flex items-center justify-center gap-2 bg-emerald-500 text-white font-black py-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)]",
-                        (!isHost || gameState.players.length < 2) && "opacity-50 grayscale pointer-events-none"
+                        "flex-[2] flex items-center justify-center gap-2 bg-emerald-500 text-white font-black py-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_10px_30px_rgba(16,185,129,0.2)] text-base"
                       )}
                     >
                       {isHost ? (
@@ -1430,87 +1429,23 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {/* Hand / Deck Controls - Hide for spectators */}
             <div className="absolute top-10 left-0 right-0 z-50 flex items-center justify-between px-16">
-              <div className="flex items-center gap-3">
-                <motion.div
-                  layout
-                  className="bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1.5 rounded-2xl flex items-center gap-2 shadow-xl"
-                >
-                  <AnimatePresence mode="popLayout">
-                    {gameState.players.map((p, i) => {
-                      const isActive = gameState.currentPlayerIndex === i;
-                      return (
-                        <motion.div
-                          key={p.id}
-                          layout
-                          initial={{ opacity: 0, scale: 0.8 }}
-                          animate={{
-                            opacity: 1,
-                            scale: 1,
-                            width: isActive ? "auto" : "36px"
-                          }}
-                          exit={{ opacity: 0, scale: 0.8 }}
-                          transition={{ type: "spring", damping: 20, stiffness: 300 }}
-                          className={cn(
-                            "h-9 rounded-xl flex items-center transition-all duration-300 border overflow-hidden",
-                            isActive
-                              ? "bg-emerald-500 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.4)] px-4 gap-2"
-                              : "bg-zinc-800/50 border-white/5 text-zinc-500 justify-center hover:bg-zinc-800 hover:text-zinc-300 cursor-help"
-                          )}
-                          title={!isActive ? `${p.name} (${p.hand.length}张)` : ""}
-                        >
-                          <div className={cn(
-                            "w-2 h-2 rounded-full flex-shrink-0",
-                            isActive ? "bg-white animate-pulse" : "bg-zinc-600"
-                          )} />
+              <div className="flex items-center gap-4">
+                {/* Spectator Count */}
+                <div className="bg-zinc-900 border-2 border-white/10 px-5 py-3 rounded-2xl flex items-center gap-3 shadow-2xl backdrop-blur-md">
+                  <Users size={20} className="text-zinc-500" />
+                  <span className="text-base font-black text-zinc-400">{gameState.spectators.length}</span>
+                </div>
 
-                          <AnimatePresence mode="wait">
-                            {isActive ? (
-                              <motion.div
-                                key="full"
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -10 }}
-                                className="flex items-center gap-2"
-                              >
-                                <span className="text-xs font-black tracking-tight whitespace-nowrap">
-                                  {p.name}
-                                  {p.isLocal && <span className="ml-1 opacity-60 text-[10px]">(你)</span>}
-                                </span>
-                                <span className="text-[10px] font-bold bg-black/20 px-1.5 py-0.5 rounded-md">
-                                  {p.hand.length}
-                                </span>
-                              </motion.div>
-                            ) : (
-                              <motion.span
-                                key="short"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="text-xs font-black uppercase"
-                              >
-                                {p.name.charAt(0)}
-                              </motion.span>
-                            )
-                            }
-                          </AnimatePresence>
-                        </motion.div>
-                      );
-                    })}
-                  </AnimatePresence>
-
-                  <div className="h-6 w-px bg-white/10 mx-1" />
-
-                  <div className="bg-zinc-800/80 px-4 py-2 rounded-xl flex items-center gap-2 border border-white/5 mx-2">
-                    <Users size={14} className="text-zinc-500" />
-                    <span className="text-[10px] font-black text-zinc-400">{gameState.spectators.length}</span>
-                  </div>
-
-                  <div className="bg-zinc-800/80 px-4 py-2 rounded-xl flex items-center gap-2 border border-white/5">
-                    {gameState.direction === 1 ? <ArrowRight size={14} className="text-emerald-500" /> : <ArrowLeft size={14} className="text-emerald-500" />}
-                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">方向</span>
-                  </div>
-                </motion.div>
+                {/* Direction Indicator (Back to Top-Left) */}
+                <div className="bg-zinc-900 border-2 border-white/10 px-5 py-3 rounded-2xl flex items-center gap-3 shadow-2xl backdrop-blur-md min-w-[120px] justify-center">
+                  {gameState.direction === 1 ? (
+                    <ArrowRight size={22} className="text-emerald-500 animate-pulse" />
+                  ) : (
+                    <ArrowLeft size={22} className="text-emerald-500 animate-pulse" />
+                  )}
+                  <span className="text-xs font-black uppercase tracking-widest text-zinc-500">方向</span>
+                </div>
 
                 {isSpectator && (
                   <div className="flex items-center gap-2">
@@ -1532,19 +1467,20 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-4">
+
                 <button
                   onClick={() => setIsMuted(!isMuted)}
-                  className="p-2.5 rounded-xl bg-zinc-900 border border-white/10 text-zinc-500 hover:text-white transition-all active:scale-90 shadow-lg"
+                  className="p-4 rounded-2xl bg-zinc-900 border-2 border-white/10 text-zinc-500 hover:text-white transition-all active:scale-90 shadow-2xl hover:border-white/20"
                   title={isMuted ? "取消静音" : "静音"}
                 >
-                  {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                  {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
                 </button>
                 <button
                   onClick={toggleFullscreen}
-                  className="p-2.5 rounded-xl bg-zinc-900 border border-white/10 text-zinc-500 hover:text-white transition-all active:scale-90 shadow-lg"
+                  className="p-4 rounded-2xl bg-zinc-900 border-2 border-white/10 text-zinc-500 hover:text-white transition-all active:scale-90 shadow-2xl hover:border-white/20"
                   title={isFullscreen ? "退出全屏" : "进入全屏"}
                 >
-                  {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                  {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
                 </button>
                 <div
                   onClick={() => {
@@ -1554,20 +1490,20 @@ export default function App() {
                     }
                   }}
                   className={cn(
-                    "bg-zinc-900 border border-white/10 px-4 py-2.5 rounded-xl shadow-lg block",
+                    "bg-zinc-900 border-2 border-white/10 px-6 py-3.5 rounded-2xl shadow-2xl block",
                     gameState.isDevMode && "cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-95"
                   )}
                 >
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">房间: </span>
-                  <span className="font-mono font-bold text-sm tracking-widest">{gameState.roomCode}</span>
+                  <span className="text-xs font-black uppercase tracking-widest text-zinc-500 mr-2">房间: </span>
+                  <span className="font-mono font-black text-lg tracking-[0.2em]">{gameState.roomCode}</span>
                 </div>
                 <button
                   onClick={leaveGame}
                   onMouseEnter={() => playSound('btnHover')}
-                  className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2.5 rounded-xl flex items-center gap-2 hover:bg-red-500 hover:text-white transition-all group active:scale-95 shadow-lg shadow-red-500/5"
+                  className="bg-red-500/10 border-2 border-red-500/20 text-red-500 px-8 py-3.5 rounded-2xl flex items-center gap-3 hover:bg-red-500 hover:text-white transition-all group active:scale-95 shadow-2xl shadow-red-500/10"
                 >
-                  <LogOut size={16} className="group-hover:translate-x-1 transition-transform" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">退出</span>
+                  <LogOut size={22} className="group-hover:translate-x-1 transition-transform" />
+                  <span className="text-lg font-black uppercase tracking-widest">退出</span>
                 </button>
               </div>
             </div>
@@ -1586,8 +1522,8 @@ export default function App() {
               />
             </div>
 
-            {/* Main Board - Perfectly Centered in 1440x850 Canvas */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-[10]">
+            {/* Main Board - Slightly lifted for better composition */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-[10] -translate-y-12">
               {/* AI / Other Players Hands (Circular Layout Centered) */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                 {(() => {
@@ -1609,13 +1545,20 @@ export default function App() {
                     const relativeIndex = (i - effectiveViewIndex + playerCount) % playerCount;
                     const angle = (relativeIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
 
+                    // Dynamic avoidance: if local hand is large, push bottom players up
+                    const localPlayerHandSize = localPlayer?.hand?.length || 0;
+                    const handThreshold = 7;
+                    const handAvoidanceFactor = Math.max(0, localPlayerHandSize - handThreshold);
+                    // Only apply avoidance to players in the bottom half of the circle
+                    const dynamicLift = Math.sin(angle) > 0 ? (Math.sin(angle) * handAvoidanceFactor * 12) : 0;
+
                     return (
                       <div
                         key={p.id}
                         className="absolute transition-all duration-700 ease-in-out pointer-events-auto"
                         style={{
                           left: `calc(50% + ${Math.cos(angle) * radiusH}px)`,
-                          top: `calc(50% + ${Math.sin(angle) * radiusV}px)`,
+                          top: `calc(50% + ${Math.sin(angle) * radiusV - dynamicLift}px)`,
                           transform: `translate(-50%, -50%) scale(${iconScale})`
                         }}
                       >
@@ -1699,7 +1642,7 @@ export default function App() {
                                 )}
                               >
                                 <span className={cn(
-                                  "text-[10px] font-black leading-none mb-0.5",
+                                  "text-[14px] font-black leading-none mb-0.5",
                                   p.hand.length <= 2 ? "text-red-500" : "text-zinc-500"
                                 )}>
                                   {p.hand.length}
@@ -1763,7 +1706,7 @@ export default function App() {
                             )}
                           </div>
                           <span className={cn(
-                            "text-[10px] font-black uppercase tracking-[0.2em] transition-colors",
+                            "text-[14px] font-black uppercase tracking-[0.2em] transition-colors",
                             gameState.currentPlayerIndex === i ? "text-emerald-400" : "text-zinc-500"
                           )}>
                             {p.name}
@@ -1847,7 +1790,7 @@ export default function App() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 20 }}
-                        className="absolute -bottom-32 px-4 py-2 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-[10px] font-black uppercase tracking-widest whitespace-nowrap z-[200]"
+                        className="absolute -bottom-32 px-4 py-2 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-[14px] font-black uppercase tracking-widest whitespace-nowrap z-[200]"
                       >
                         近期打出的牌 (最后 5 张)
                       </motion.div>
@@ -1862,7 +1805,7 @@ export default function App() {
 
             <div className={cn(
               "absolute bottom-0 left-0 right-0 z-30 flex flex-col items-center justify-end pointer-events-none",
-              gameState.players.length > 6 ? "pb-4" : "pb-8"
+              isScalingMode ? "pb-24" : (gameState.players.length > 6 ? "pb-12" : "pb-16")
             )}>
               {/* JUMP IN! Bubble for Local Player */}
               <AnimatePresence>
@@ -1909,7 +1852,7 @@ export default function App() {
                 )}>
                   <div className={cn("w-2 h-2 rounded-full", isTargetTurn ? "bg-emerald-400 animate-ping" : "bg-zinc-700")} />
                   <div className="flex flex-col items-start -space-y-1">
-                    <span className="text-sm font-black uppercase tracking-widest">
+                    <span className="text-lg font-black uppercase tracking-widest">
                       {isTargetTurn ? (isShowingActualSelf ? "你的回合" : `${displayedPlayer?.name} 的回合`) : `${gameState.players[gameState.currentPlayerIndex]?.name || '未知'} 的回合`}
                     </span>
                   </div>
@@ -1929,7 +1872,7 @@ export default function App() {
                   <button
                     onClick={() => setShowRecommendations(!showRecommendations)}
                     className={cn(
-                      "px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all border",
+                      "px-8 py-3 rounded-full text-base font-black uppercase tracking-widest transition-all border",
                       showRecommendations ? "bg-white text-black border-white shadow-lg" : "bg-zinc-950/80 text-white border-white/20 hover:border-white/40 backdrop-blur-md"
                     )}
                   >
@@ -1951,7 +1894,7 @@ export default function App() {
                           drawCard();
                         }}
                         className={cn(
-                          "px-8 py-2.5 text-sm font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
+                          "px-8 py-3 text-lg font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
                           gameState.drawStack > 0
                             ? "bg-red-500 text-white shadow-[0_10px_30px_rgba(239,68,68,0.4)] hover:scale-105 active:scale-95"
                             : "bg-amber-500 text-white shadow-[0_10px_40px_rgba(245,158,11,0.4)] hover:bg-amber-400"
@@ -1968,7 +1911,7 @@ export default function App() {
                           animate={{ scale: 1, x: 0, opacity: 1 }}
                           exit={{ scale: 0.8, x: 20, opacity: 0 }}
                           onClick={() => playCard(selectedCardId)}
-                          className="px-8 py-2.5 bg-emerald-500 text-white text-sm font-black uppercase tracking-widest rounded-full shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                          className="px-8 py-3 bg-emerald-500 text-white text-lg font-black uppercase tracking-widest rounded-full shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
                         >
                           <Play size={16} fill="currentColor" /> 确定出牌
                         </motion.button>
@@ -1987,7 +1930,7 @@ export default function App() {
                           onClick={() => {
                             playCard(selectedCardId);
                           }}
-                          className="px-10 py-3 bg-yellow-400 text-black text-sm font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
+                          className="px-10 py-4 bg-yellow-400 text-black text-lg font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
                         >
                           <Zap size={18} fill="currentColor" /> 绝地抢牌！
                         </motion.button>
@@ -2070,135 +2013,133 @@ export default function App() {
                     })}
                 </div>
 
-                {/* Sorting Buttons */}
-                <div className="flex bg-zinc-900/80 backdrop-blur-md p-1.5 rounded-2xl border border-white/10 pointer-events-auto transition-all hover:border-white/20 -mt-2 shadow-2xl">
-                  <button
-                    onClick={() => { setSortType('value'); playSound('click'); }}
-                    className={cn(
-                      "px-8 py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.2em] transition-all",
-                      sortType === 'value' ? "bg-white text-black shadow-lg scale-105" : "text-zinc-500 hover:text-white"
-                    )}
-                  >
-                    按数字
-                  </button>
-                  <button
-                    onClick={() => { setSortType('color'); playSound('click'); }}
-                    className={cn(
-                      "px-8 py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.2em] transition-all",
-                      sortType === 'color' ? "bg-white text-black shadow-lg scale-105" : "text-zinc-500 hover:text-white"
-                    )}
-                  >
-                    按花色
-                  </button>
-                </div>
               </div>
+            </div>
 
-              {/* Bottom Controls Area */}
-              {!isSpectator && (
-                <div className="absolute bottom-40 left-0 right-0 flex flex-col items-center pointer-events-none">
-                  {/* Dev Command Center Overlay */}
-                  {gameState.isDevMode && (
-                    <div className="absolute -bottom-20 right-40 z-[500] flex flex-col items-end gap-3 pointer-events-none">
-                      <AnimatePresence>
-                        {seeAllHands && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.8, x: 20 }}
-                            animate={{ opacity: 1, scale: 1, x: 0 }}
-                            exit={{ opacity: 0, scale: 0.8, x: 20 }}
-                            className="bg-zinc-900/90 backdrop-blur-xl border border-white/20 p-4 rounded-2xl shadow-2xl pointer-events-auto"
-                          >
-                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">手牌监测中</p>
-                            <div className="flex gap-2">
-                              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                              <span className="text-[10px] uppercase font-bold text-white/50">上帝视角已启用</span>
-                            </div>
-                          </motion.div>
+            {/* Bottom Controls Area */}
+            {!isSpectator && (
+              <div className="absolute bottom-40 left-0 right-0 flex flex-col items-center pointer-events-none">
+                {/* Dev Command Center Overlay */}
+                {gameState.isDevMode && (
+                  <div className="absolute -bottom-20 right-40 z-[500] flex flex-col items-end gap-3 pointer-events-none">
+                    <AnimatePresence>
+                      {seeAllHands && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                          animate={{ opacity: 1, scale: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.8, x: 20 }}
+                          className="bg-zinc-900/90 backdrop-blur-xl border border-white/20 p-4 rounded-2xl shadow-2xl pointer-events-auto"
+                        >
+                          <p className="text-[12px] font-black uppercase tracking-widest text-zinc-500 mb-2">手牌监测中</p>
+                          <div className="flex gap-2">
+                            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-[12px] uppercase font-bold text-white/50">上帝视角已启用</span>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="bg-zinc-900 border-2 border-emerald-500/50 p-2 rounded-2xl shadow-2xl flex items-center gap-2 pointer-events-auto backdrop-blur-md">
+                      <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                        <span className="text-[12px] font-black uppercase tracking-tighter text-emerald-500">DEV PANEL</span>
+                      </div>
+
+                      <button
+                        onClick={() => setSeeAllHands(!seeAllHands)}
+                        className={cn(
+                          "p-2 rounded-xl transition-all active:scale-90",
+                          seeAllHands ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-500 hover:text-white"
                         )}
-                      </AnimatePresence>
+                        title="上帝视角 (查看所有手牌)"
+                      >
+                        <RefreshCw size={18} className={seeAllHands ? "animate-spin-slow" : ""} />
+                      </button>
 
-                      <div className="bg-zinc-900 border-2 border-emerald-500/50 p-2 rounded-2xl shadow-2xl flex items-center gap-2 pointer-events-auto backdrop-blur-md">
-                        <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                          <span className="text-[10px] font-black uppercase tracking-tighter text-emerald-500">DEV PANEL</span>
-                        </div>
+                      <button
+                        onClick={forceWin}
+                        className="p-2 bg-yellow-400 text-black rounded-xl hover:scale-110 active:scale-95 transition-all shadow-lg"
+                        title="瞬间获胜"
+                      >
+                        <Trophy size={18} fill="currentColor" />
+                      </button>
 
-                        <button
-                          onClick={() => setSeeAllHands(!seeAllHands)}
-                          className={cn(
-                            "p-2 rounded-xl transition-all active:scale-90",
-                            seeAllHands ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-500 hover:text-white"
-                          )}
-                          title="上帝视角 (查看所有手牌)"
-                        >
-                          <RefreshCw size={18} className={seeAllHands ? "animate-spin-slow" : ""} />
-                        </button>
-
-                        <button
-                          onClick={forceWin}
-                          className="p-2 bg-yellow-400 text-black rounded-xl hover:scale-110 active:scale-95 transition-all shadow-lg"
-                          title="瞬间获胜"
-                        >
-                          <Trophy size={18} fill="currentColor" />
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setGameState(p => {
-                              const players = [...p.players];
-                              const randomCard = createDeck()[0];
-                              if (players[p.currentPlayerIndex]) {
-                                players[p.currentPlayerIndex].hand.push(randomCard);
-                              }
-                              return { ...p, players };
-                            });
-                            playSound('draw');
-                          }}
-                          className="p-2 bg-white text-black rounded-xl hover:scale-110 active:scale-95 transition-all"
-                          title="给当前玩家加牌"
-                        >
-                          <Plus size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Bottom-Left Deck Counter (Moved inside virtual canvas) */}
-                  <div className="absolute -bottom-20 -left-[450px] z-[200] pointer-events-none drop-shadow-2xl">
-                    <div
-                      onClick={() => {
-                        if (isLocalTurn && !isAnimating && !isPendingColor) {
-                          drawCard();
-                          playSound('click');
-                        }
-                      }}
-                      className={cn(
-                        "relative group transition-all duration-500 pointer-events-auto cursor-pointer",
-                        !(isLocalTurn && !isAnimating && !isPendingColor) && "grayscale opacity-80 cursor-not-allowed"
-                      )}
-                    >
-                      {/* Stacked cards effect */}
-                      <div className="absolute top-1 left-1 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-6 transition-transform group-hover:-translate-y-2" />
-                      <div className="absolute top-0.5 left-0.5 w-[60px] h-[84px] bg-zinc-800 rounded-lg border-2 border-zinc-700 -rotate-3 transition-transform group-hover:-translate-y-1" />
-
-                      <div className={cn(
-                        "relative w-[60px] h-[84px] bg-zinc-900 rounded-lg border-2 flex flex-col items-center justify-center gap-1 shadow-2xl backdrop-blur-sm transition-all group-hover:scale-110",
-                        isLocalTurn && !isAnimating && !isPendingColor ? "border-emerald-500 shadow-emerald-500/20" : "border-zinc-700"
-                      )}>
-                        <Zap size={14} className={cn("text-emerald-500", isLocalTurn && "animate-pulse")} fill="currentColor" />
-                        <div className="flex flex-col items-center">
-                          <span className="text-xl font-black italic tracking-tighter text-white">{gameState.deck.length}</span>
-                          <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500/70">DECK</span>
-                        </div>
-                      </div>
-
-                      {/* Glow effect */}
-                      {isLocalTurn && !isAnimating && !isPendingColor && (
-                        <div className="absolute -inset-4 bg-emerald-500/20 rounded-full blur-2xl -z-10 animate-pulse" />
-                      )}
+                      <button
+                        onClick={() => {
+                          setGameState(p => {
+                            const players = [...p.players];
+                            const randomCard = createDeck()[0];
+                            if (players[p.currentPlayerIndex]) {
+                              players[p.currentPlayerIndex].hand.push(randomCard);
+                            }
+                            return { ...p, players };
+                          });
+                          playSound('draw');
+                        }}
+                        className="p-2 bg-white text-black rounded-xl hover:scale-110 active:scale-95 transition-all"
+                        title="给当前玩家加牌"
+                      >
+                        <Plus size={18} />
+                      </button>
                     </div>
                   </div>
+                )}
+
+                {/* Bottom Bar Controls - Split into Corners */}
+                <div className="absolute bottom-10 left-10 right-10 z-[1000] pointer-events-none flex items-end justify-between h-32">
+                  {/* Left Corner: Deck Counter (Styled like Action Button) */}
+                  <div
+                    onClick={() => {
+                      if (isLocalTurn && !isAnimating && !isPendingColor) {
+                        drawCard();
+                        playSound('click');
+                      }
+                    }}
+                    className={cn(
+                      "group flex items-center gap-3 px-8 py-4 bg-zinc-900/90 backdrop-blur-xl border-2 rounded-[32px] pointer-events-auto cursor-pointer shadow-2xl transition-all active:scale-90",
+                      isLocalTurn && !isAnimating && !isPendingColor
+                        ? "border-emerald-500 shadow-emerald-500/20"
+                        : "border-zinc-800 grayscale opacity-80 cursor-not-allowed"
+                    )}
+                  >
+                    <div className="relative">
+                      <Zap size={24} className={cn("text-emerald-500", isLocalTurn && "animate-pulse")} fill="currentColor" />
+                      {isLocalTurn && !isAnimating && !isPendingColor && (
+                        <div className="absolute -inset-2 bg-emerald-500/20 rounded-full blur-xl animate-pulse" />
+                      )}
+                    </div>
+                    <div className="flex flex-col items-start -space-y-1">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black italic tracking-tighter text-white">{gameState.deck.length}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500/50">张</span>
+                      </div>
+                      <span className="text-[12px] font-black uppercase tracking-widest text-zinc-500">剩余牌堆/摸牌</span>
+                    </div>
+                  </div>
+
+                  {/* Right Corner: Sorting Selection */}
+                  <div className="flex bg-zinc-900/90 backdrop-blur-xl p-2 rounded-[32px] border-2 border-white/10 pointer-events-auto shadow-2xl transition-all hover:border-white/20">
+                    <button
+                      onClick={() => { setSortType('value'); playSound('click'); }}
+                      className={cn(
+                        "px-8 py-4 rounded-[24px] text-lg font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2",
+                        sortType === 'value' ? "bg-white text-black shadow-lg scale-105" : "text-zinc-500 hover:text-white"
+                      )}
+                    >
+                      按数字
+                    </button>
+                    <button
+                      onClick={() => { setSortType('color'); playSound('click'); }}
+                      className={cn(
+                        "px-8 py-4 rounded-[24px] text-lg font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2",
+                        sortType === 'color' ? "bg-white text-black shadow-lg scale-105" : "text-zinc-500 hover:text-white"
+                      )}
+                    >
+                      按花色
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </motion.div>
         </div>
       </div>
@@ -2241,7 +2182,7 @@ export default function App() {
 
           {/* Recapped Cards (Subtle) */}
           <div className="bg-zinc-900/60 backdrop-blur-xl p-10 rounded-[50px] border-2 border-white/10 shadow-2xl flex flex-col items-center">
-            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-500 mb-12">决胜瞬间 (最近 5 张)</p>
+            <p className="text-[14px] font-black uppercase tracking-[0.4em] text-zinc-500 mb-12">决胜瞬间 (最近 5 张)</p>
             <div className="flex justify-center h-48 w-full relative items-center min-w-[500px]">
               {gameState.discardPile.slice(-5).map((card, idx, arr) => {
                 const isFinal = idx === arr.length - 1;
@@ -2276,7 +2217,7 @@ export default function App() {
                         transition={{ delay: 1 }}
                         className="absolute -top-16 left-1/2 -translate-x-1/2 bg-yellow-400 text-black px-6 py-2 rounded-full shadow-[0_10px_30px_rgba(250,204,21,0.5)] z-[210] border-2 border-black"
                       >
-                        <span className="text-sm font-black italic tracking-tighter uppercase whitespace-nowrap">
+                        <span className="text-lg font-black italic tracking-tighter uppercase whitespace-nowrap">
                           制胜一击
                         </span>
                       </motion.div>
@@ -2286,13 +2227,28 @@ export default function App() {
               })}
             </div>
 
-            <div className="flex flex-col items-center gap-4 mt-16 w-full">
+            <div className="flex flex-row items-center justify-center gap-6 mt-16 w-full pointer-events-auto">
               <button
                 onClick={leaveGame}
-                className="text-zinc-500 font-bold hover:text-white transition-colors text-xs uppercase tracking-widest"
+                className="px-8 py-4 bg-zinc-800 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-700 transition-all border border-white/5 shadow-xl active:scale-95 text-lg"
               >
                 返回主菜单
               </button>
+
+              {gameState.players[0]?.isLocal && (
+                <button
+                  onClick={startGame}
+                  className="px-10 py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-400 transition-all shadow-xl shadow-emerald-500/20 active:scale-95 animate-bounce-short text-lg"
+                >
+                  再来一局
+                </button>
+              )}
+
+              {!gameState.players[0]?.isLocal && (
+                <div className="px-8 py-4 bg-zinc-900/50 text-zinc-400 rounded-2xl font-bold uppercase tracking-widest border border-white/5 italic text-sm">
+                  等待房主重新开始...
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2331,7 +2287,7 @@ export default function App() {
             </p>
             <div className="mt-12 flex items-center gap-2 px-6 py-3 rounded-2xl bg-zinc-900 border border-white/5">
               <RotateCw size={16} className="text-emerald-500 animate-spin-slow" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">正在检测屏幕方向...</span>
+              <span className="text-[12px] font-black uppercase tracking-widest text-zinc-400">正在检测屏幕方向...</span>
             </div>
           </motion.div>
         )}
@@ -2352,18 +2308,18 @@ export default function App() {
               </div>
               <div className="flex-1">
                 <h3 className="text-white font-black italic tracking-tighter text-lg">全屏游戏体验更佳</h3>
-                <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest">隐藏工具栏，获得更大视野</p>
+                <p className="text-zinc-400 text-[12px] font-bold uppercase tracking-widest">隐藏工具栏，获得更大视野</p>
               </div>
               <div className="flex flex-col gap-2">
                 <button
                   onClick={toggleFullscreen}
-                  className="bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
+                  className="bg-emerald-500 text-white px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
                 >
                   全屏
                 </button>
                 <button
                   onClick={() => setShowFullscreenPrompt(false)}
-                  className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest hover:text-white"
+                  className="text-zinc-500 text-[12px] font-bold uppercase tracking-widest hover:text-white"
                 >
                   关闭
                 </button>

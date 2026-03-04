@@ -105,7 +105,7 @@ export const Card = React.memo<CardProps>(({ card, onClick, disabled, isFaceDown
     >
       <div className={cn(
         "self-start font-black leading-none",
-        card.value.length > 5 ? "text-[8px]" : "text-sm"
+        card.value.length > 5 ? "text-[12px]" : "text-lg"
       )}>
         {card.value.toUpperCase()}
       </div>
@@ -122,7 +122,7 @@ export const Card = React.memo<CardProps>(({ card, onClick, disabled, isFaceDown
 
       <div className={cn(
         "self-end font-black leading-none transform rotate-180",
-        card.value.length > 5 ? "text-[8px]" : "text-sm"
+        card.value.length > 5 ? "text-[12px]" : "text-lg"
       )}>
         {card.value.toUpperCase()}
       </div>
