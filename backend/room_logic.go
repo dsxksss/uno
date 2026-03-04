@@ -380,6 +380,15 @@ func (r *Room) UpdateAISettings(playerID string, aiCount int, difficulty Difficu
 		}
 	}
 
+	// Limit aiCount so that total players <= 10
+	maxAI := 10 - len(humans)
+	if aiCount > maxAI {
+		aiCount = maxAI
+	}
+	if aiCount < 0 {
+		aiCount = 0
+	}
+
 	newPlayers := make([]Player, len(humans))
 	copy(newPlayers, humans)
 

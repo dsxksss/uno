@@ -125,6 +125,7 @@ export default function App() {
   const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
 
   const [isPortrait, setIsPortrait] = useState(false);
+  const [isScalingMode, setIsScalingMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
 
@@ -148,9 +149,10 @@ export default function App() {
 
       // Use scaling mode for small screens or mobile devices to keep UI consistent
       // For desktops (even with touch), use responsive fluid layout if width is large enough
-      const isScalingMode = (isTouch && width < 1200) || width < 1024;
+      const scaling = (isTouch && width < 1200) || width < 1024;
+      setIsScalingMode(scaling);
 
-      if (isScalingMode) {
+      if (scaling) {
         const baseWidth = 1440;
         const baseHeight = 850;
         const scale = Math.min(width / baseWidth, height / baseHeight);
@@ -223,6 +225,12 @@ export default function App() {
           }));
 
           setViewingPlayerId(v => v || clientIdRef.current);
+
+          // If host, sync AI count
+          if (newState.players?.[0]?.id === clientIdRef.current) {
+            const botsCount = newState.players.filter((p: any) => p.id.startsWith('ai-')).length;
+            setAiCount(botsCount);
+          }
         }
 
         setGameState(newState);
@@ -315,7 +323,7 @@ export default function App() {
       const newPlayers = prev.players.filter(p => p.id !== id);
       // Adjust aiCount if it was a bot
       if (id.startsWith('ai-')) {
-        setAiCount(newPlayers.filter(p => !p.isLocal).length);
+        setAiCount(newPlayers.filter(p => p.id.startsWith('ai-')).length);
       }
       return { ...prev, players: newPlayers };
     });
@@ -569,11 +577,17 @@ export default function App() {
           className="relative w-[1440px] h-[850px] pointer-events-auto flex flex-col items-center justify-center shrink-0"
           style={{ transform: `scale(var(--ui-scale))` }}
         >
-          <div className="pointer-events-auto flex flex-col items-center justify-center w-full h-full">
+          <div className={cn(
+            "pointer-events-auto flex items-center justify-center w-full h-full p-8 transition-all duration-500",
+            isPortrait ? "flex-col gap-8" : "flex-row gap-24 lg:gap-48"
+          )}>
             <motion.div
-              initial={{ y: -50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="relative mb-4 group cursor-default select-none"
+              initial={isPortrait ? { y: -50, opacity: 0 } : { x: -80, opacity: 0 }}
+              animate={isPortrait ? { y: 0, opacity: 1 } : { x: 0, opacity: 1 }}
+              className={cn(
+                "relative group cursor-default select-none transition-all duration-500 lg:mr-12",
+                isPortrait ? "scale-100 mb-4" : (isScalingMode ? "scale-100" : "scale-150")
+              )}
             >
               <div className="relative">
                 {/* Main Comic Bubble Wrapper */}
@@ -634,7 +648,7 @@ export default function App() {
             </motion.div>
 
             <div
-              className="w-full max-w-lg max-h-[520px] overflow-y-auto space-y-3 bg-zinc-900/50 p-5 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl transition-all custom-scrollbar"
+              className="w-full max-w-lg bg-zinc-900/50 p-5 rounded-3xl border border-white/10 backdrop-blur-xl shadow-2xl transition-all flex flex-col"
             >
               {!gameState.roomCode ? (
                 <div className="flex flex-col items-center justify-center py-4">
@@ -679,7 +693,7 @@ export default function App() {
                         </button>
                       </div>
 
-                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                      <div className="space-y-3 max-h-[360px] lg:max-h-[480px] overflow-y-auto pr-2 custom-scrollbar">
                         {activeRooms.length === 0 ? (
                           <div className="text-center py-10 bg-zinc-900/30 rounded-2xl border border-dashed border-white/5 text-zinc-500 text-xs italic">
                             目前没有任何可加入的房间...
@@ -724,11 +738,11 @@ export default function App() {
                                 className={cn(
                                   "px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
                                   playerName
-                                    ? (room.status === 'playing' ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
+                                    ? (room.status === 'playing' || room.playerCount >= 10 ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-emerald-500 text-white hover:bg-emerald-400")
                                     : "bg-zinc-800 text-zinc-600 grayscale cursor-not-allowed border border-white/5"
                                 )}
                               >
-                                {playerName ? (room.status === 'playing' ? '观战' : '加入') : '设置昵称'}
+                                {playerName ? (room.status === 'playing' || room.playerCount >= 10 ? '观战' : '加入') : '设置昵称'}
                               </button>
                             </div>
                           ))
@@ -856,7 +870,8 @@ export default function App() {
                           <span className="text-xs font-black min-w-[2ch] text-center">{aiCount}</span>
                           <button
                             onClick={() => {
-                              if (aiCount < 9) {
+                              const humansCount = gameState.players.filter(p => !p.id.startsWith('ai-')).length;
+                              if (humansCount + aiCount < 10) {
                                 const newCount = aiCount + 1;
                                 setAiCount(newCount);
                                 socketRef.current?.send(JSON.stringify({
@@ -910,7 +925,7 @@ export default function App() {
                         </div>
                       </div>
                     )}
-                    <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                    <div className="grid grid-cols-1 gap-2 max-h-64 lg:max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                       {gameState.players.map((p, index) => (
                         <motion.div
                           initial={{ x: -20, opacity: 0 }}
