@@ -105,13 +105,13 @@ export const Card = React.memo<CardProps>(({ card, onClick, disabled, isFaceDown
     >
       <div className={cn(
         "self-start font-black leading-none",
-        card.value.length > 5 ? "text-[10px]" : "text-lg"
+        card.value.length > 5 ? "text-[8px]" : "text-sm"
       )}>
         {card.value.toUpperCase()}
       </div>
 
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-[length:calc(2.5rem*var(--ui-scale))] font-black italic tracking-tighter drop-shadow-lg transform -rotate-12">
+        <div className="text-4xl font-black italic tracking-tighter drop-shadow-lg transform -rotate-12">
           {card.value === 'draw2' ? '+2' :
             card.value === 'draw4' ? '+4' :
               card.value === 'skip' ? '⊘' :
@@ -122,7 +122,7 @@ export const Card = React.memo<CardProps>(({ card, onClick, disabled, isFaceDown
 
       <div className={cn(
         "self-end font-black leading-none transform rotate-180",
-        card.value.length > 5 ? "text-[10px]" : "text-lg"
+        card.value.length > 5 ? "text-[8px]" : "text-sm"
       )}>
         {card.value.toUpperCase()}
       </div>
