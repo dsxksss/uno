@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Card } from './components/Card';
-import { CardData, GameState, Player, cn, CardColor, Difficulty } from './types';
-import { createDeck, canPlayCard, canJumpIn, shuffle, isNumberCard } from './utils';
-import { Users, Plus, Play, LogIn, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize, AlertCircle } from 'lucide-react';
+import { CardData, GameState, cn, CardColor, Difficulty } from './types';
+import { createDeck, canPlayCard, canJumpIn, isNumberCard } from './utils';
+import { Users, Plus, Play, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize } from 'lucide-react';
 import { Howl } from 'howler';
-
-const INITIAL_HAND_SIZE = 7;
 
 // Sound effects - Organic, thumpy "dong dong" style (no mechanical sounds)
 const sounds = {
@@ -102,28 +100,25 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [aiCount, setAiCount] = useState(0);
   const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('medium');
-  const [drawingCards, setDrawingCards] = useState<{ id: string, playerIndex: number, card: CardData }[]>([]);
   const [devClicks, setDevClicks] = useState(0);
   const [seeAllHands, setSeeAllHands] = useState(false);
   const [hoveredGodModePlayerId, setHoveredGodModePlayerId] = useState<string | null>(null);
   const [activeRooms, setActiveRooms] = useState<{ code: string, playerCount: number }[]>([]);
-  const [showRoomHall, setShowRoomHall] = useState(true);
   const [copied, setCopied] = useState(false);
   const lastPlayedCardIdRef = useRef<string | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevTimeLeftRef = useRef<number>(30);
+  const playedEndSoundRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const clientIdRef = useRef<string | null>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
   const [ripples, setRipples] = useState<{ id: string, color: string, x: number, y: number, scale: number, thickness: number }[]>([]);
-  const [actionBubble, setActionBubble] = useState<{ text: string, color: string } | null>(null);
+  const [actionBubble] = useState<{ text: string, color: string } | null>(null);
   const [actionFlash, setActionFlash] = useState<{ color: string, type: string, text: string } | null>(null);
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
+  const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
   const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
   const isSpectator = gameState.spectators.some(s => s.isLocal);
   const me = [...(gameState.players || []), ...(gameState.spectators || [])].find(p => p.isLocal);
-  const isHost = gameState.players?.[0]?.isLocal;
-  const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
 
   const [isPortrait, setIsPortrait] = useState(false);
   const [isScalingMode, setIsScalingMode] = useState(false);
@@ -230,7 +225,6 @@ export default function App() {
       if (msg.type === 'INIT') {
         const id = msg.payload.id;
         clientIdRef.current = id;
-        setClientId(id);
 
         // Connection established, request room list
         socket.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
@@ -296,23 +290,19 @@ export default function App() {
     const isUltra = ['draw4', 'wild'].includes(value);
     const isDraw2 = value === 'draw2';
 
-    let particleCount = 40;
     let rippleScale = 3.5;
     let rippleThickness = 4;
     let shakeIntensity = 0.5;
 
     if (isUltra) {
-      particleCount = 250;
       rippleScale = 8;
       rippleThickness = 12;
       shakeIntensity = 2.5;
     } else if (isDraw2) {
-      particleCount = 150;
       rippleScale = 5.5;
       rippleThickness = 8;
       shakeIntensity = 1.8;
     } else if (isSpecial) {
-      particleCount = 100;
       rippleScale = 4.5;
       rippleThickness = 6;
       shakeIntensity = 1.2;
@@ -348,7 +338,7 @@ export default function App() {
     if (isUltra) {
       // Additional effects for +4 could go here
     }
-  }, [triggerShake]);
+  }, [triggerShake, gameState.jumpInPlayerId]);
 
   const createRoom = () => {
     if (!playerName || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
@@ -378,12 +368,6 @@ export default function App() {
       status: 'ended',
       winner: winnerName
     }));
-
-    if (gameState.players[gameState.currentPlayerIndex]?.isLocal) {
-      playSound('win');
-    } else {
-      playSound('lose');
-    }
   };
 
   const joinRoom = () => {
@@ -450,7 +434,7 @@ export default function App() {
     playSound('click');
   };
 
-  const playCard = (playerIndex: number, cardId: string) => {
+  const playCard = (cardId: string) => {
     if (!socketRef.current) return;
     socketRef.current.send(JSON.stringify({
       type: 'PLAY_CARD',
@@ -458,7 +442,7 @@ export default function App() {
     }));
   };
 
-  const drawCard = (playerIndex: number) => {
+  const drawCard = () => {
     if (!socketRef.current) return;
     socketRef.current.send(JSON.stringify({ type: 'DRAW_CARD' }));
   };
@@ -472,7 +456,7 @@ export default function App() {
     playSound('color');
   };
 
-  const shoutUNO = (playerId: string) => {
+  const shoutUNO = () => {
     if (!socketRef.current) return;
     socketRef.current.send(JSON.stringify({ type: 'SHOUT_UNO' }));
   };
@@ -516,6 +500,20 @@ export default function App() {
       playSound('turn');
     }
   }, [gameState.currentPlayerIndex]);
+
+  // Game End Sound Notification
+  useEffect(() => {
+    if (gameState.status === 'ended' && gameState.winner && !playedEndSoundRef.current) {
+      if (me?.name === gameState.winner) {
+        playSound('win');
+      } else {
+        playSound('lose');
+      }
+      playedEndSoundRef.current = true;
+    } else if (gameState.status !== 'ended') {
+      playedEndSoundRef.current = false;
+    }
+  }, [gameState.status, gameState.winner, me?.name]);
 
   useEffect(() => {
     if (gameState.status !== 'playing' || gameState.discardPile.length <= 1) return;
@@ -591,19 +589,18 @@ export default function App() {
     const topCard = gameState.discardPile[gameState.discardPile.length - 1];
     const drawStack = gameState.drawStack;
     const currentWildColor = gameState.currentWildColor;
-    const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
 
     // Immediate Jump-in
     if (!isLocalTurn && !isPendingColor && canJumpIn(card, topCard, drawStack)) {
       playSound('jump');
-      playCard(localPlayerIndex, card.id);
+      playCard(card.id);
       return;
     }
 
     // Normal play selection
     if (isLocalTurn && !isPendingColor && canPlayCard(card, topCard, drawStack, currentWildColor, lastNumberValue)) {
       // Rule: Cannot win with an action card
-      if (me.hand.length === 1 && !isNumberCard(card)) {
+      if (me?.hand.length === 1 && !isNumberCard(card)) {
         return;
       }
 
@@ -1071,11 +1068,9 @@ export default function App() {
     const displayedPlayer = gameState.players[effectiveViewIndex];
     const isShowingActualSelf = displayedPlayer?.id === localPlayer.id;
 
-    const isHost = gameState.players.length > 0 && gameState.players[0].isLocal;
     const isLocalTurn = gameState.players[gameState.currentPlayerIndex]?.isLocal ?? false;
     const isTargetTurn = gameState.currentPlayerIndex === effectiveViewIndex;
     const topCard = gameState.discardPile[gameState.discardPile.length - 1];
-    const currentWildColor = gameState.currentWildColor;
     const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
     const isLocalPendingColor = gameState.pendingWildColorPlayerIndex !== null && (gameState.players[gameState.pendingWildColorPlayerIndex]?.isLocal ?? false);
     const isAnimating = gameState.isReverseActive || !!gameState.jumpInPlayerId;
@@ -1805,7 +1800,6 @@ export default function App() {
                   <AnimatePresence mode="popLayout">
                     {gameState.discardPile.slice(-5).map((card, idx, arr) => {
                       const isTop = idx === arr.length - 1;
-                      const posIndex = arr.length - 1 - idx; // 0 for top, 1 for next...
 
                       // Fan out calculation
                       const centerOffset = idx - (arr.length - 1) / 2;
@@ -1864,42 +1858,6 @@ export default function App() {
             </div>
 
             <div className="absolute inset-0 pointer-events-none z-[1000]">
-              <AnimatePresence>
-                {drawingCards.map(dc => {
-                  const playerCount = gameState.players.length;
-                  // Must match the relative index logic used in avatars
-                  const relativeIndex = (dc.playerIndex - effectiveViewIndex + playerCount) % playerCount;
-                  const angle = (relativeIndex / playerCount) * Math.PI * 2 + Math.PI / 2;
-
-                  const isLarge = playerCount > 6;
-                  const radiusH = isLarge ? 480 : 520;
-                  const radiusV = isLarge ? 280 : 320;
-                  const iconScale = isLarge ? 0.75 : 0.9;
-
-                  // Target positions matched exactly with player icon positions (using px now)
-                  const tx = Math.cos(angle) * radiusH;
-                  const ty = Math.sin(angle) * radiusV;
-
-                  return (
-                    <motion.div
-                      key={dc.id}
-                      initial={{ x: -250, y: 150, opacity: 0, scale: 0.5, rotate: 0 }}
-                      animate={{
-                        x: tx,
-                        y: ty,
-                        opacity: 1,
-                        scale: dc.playerIndex === effectiveViewIndex ? 1 : (0.6 * iconScale),
-                        rotate: 720
-                      }}
-                      exit={{ opacity: 0, scale: 0 }}
-                      transition={{ duration: 0.6, ease: [0.23, 1, 0.32, 1] }}
-                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-                    >
-                      <Card card={dc.card} isFaceDown={dc.playerIndex !== effectiveViewIndex} className="shadow-[0_20px_60px_rgba(0,0,0,0.8)]" />
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
             </div>
 
             <div className={cn(
@@ -1932,7 +1890,7 @@ export default function App() {
                     <motion.button
                       whileHover={{ scale: 1.1, rotate: 5 }}
                       whileTap={{ scale: 0.9 }}
-                      onClick={() => shoutUNO(localPlayer.id)}
+                      onClick={() => shoutUNO()}
                       className="relative group"
                     >
                       <div className="absolute -inset-4 bg-orange-500 rounded-full blur-2xl opacity-50 animate-pulse" />
@@ -1990,7 +1948,7 @@ export default function App() {
                         exit={{ scale: 0.8, opacity: 0 }}
                         onClick={() => {
                           setSelectedCardId(null);
-                          drawCard(gameState.currentPlayerIndex);
+                          drawCard();
                         }}
                         className={cn(
                           "px-8 py-2.5 text-sm font-black uppercase tracking-widest rounded-full transition-all flex items-center gap-2",
@@ -2009,7 +1967,7 @@ export default function App() {
                           initial={{ scale: 0.8, x: 20, opacity: 0 }}
                           animate={{ scale: 1, x: 0, opacity: 1 }}
                           exit={{ scale: 0.8, x: 20, opacity: 0 }}
-                          onClick={() => playCard(gameState.currentPlayerIndex, selectedCardId)}
+                          onClick={() => playCard(selectedCardId)}
                           className="px-8 py-2.5 bg-emerald-500 text-white text-sm font-black uppercase tracking-widest rounded-full shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
                         >
                           <Play size={16} fill="currentColor" /> 确定出牌
@@ -2027,8 +1985,7 @@ export default function App() {
                           exit={{ scale: 0, rotate: 20 }}
                           onMouseEnter={() => playSound('btnHover')}
                           onClick={() => {
-                            const localPlayerIndex = gameState.players.findIndex(p => p.isLocal);
-                            playCard(localPlayerIndex, selectedCardId);
+                            playCard(selectedCardId);
                           }}
                           className="px-10 py-3 bg-yellow-400 text-black text-sm font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-black hover:scale-110 active:scale-90 transition-all flex items-center gap-3 animate-bounce-short"
                         >
@@ -2047,7 +2004,6 @@ export default function App() {
                   className="relative flex items-center justify-center w-full h-48 pointer-events-auto"
                 >
                   {[...displayedPlayer.hand]
-                    .filter(card => !drawingCards.some(dc => dc.card.id === card.id))
                     .sort((a, b) => {
                       if (sortType === 'color') {
                         const colorOrder = { red: 0, blue: 1, green: 2, yellow: 3, wild: 4 };
@@ -2210,7 +2166,7 @@ export default function App() {
                     <div
                       onClick={() => {
                         if (isLocalTurn && !isAnimating && !isPendingColor) {
-                          drawCard(gameState.currentPlayerIndex);
+                          drawCard();
                           playSound('click');
                         }
                       }}
