@@ -66,6 +66,7 @@ func (r *Room) StartGame() {
 		CurrentWildColor:   "",
 		IsDevMode:          r.State.IsDevMode,
 		Spectators:         r.State.Spectators,
+		PlayAgainVotes:     make(map[string]bool),
 	}
 
 	go r.StartTimer()
@@ -601,6 +602,33 @@ func (r *Room) TransferHost(currentHostID string, targetPlayerID string) {
 	})
 }
 
+func (r *Room) VotePlayAgain(playerID string) {
+	if r.State.Status != Ended {
+		return
+	}
+	if r.State.PlayAgainVotes == nil {
+		r.State.PlayAgainVotes = make(map[string]bool)
+	}
+	r.State.PlayAgainVotes[playerID] = true
+
+	// Check if all human players have voted
+	allHumanVoted := true
+	humanCount := 0
+	for _, p := range r.State.Players {
+		if !startsWith(p.ID, "ai-") {
+			humanCount++
+			if !r.State.PlayAgainVotes[p.ID] {
+				allHumanVoted = false
+				break
+			}
+		}
+	}
+
+	if humanCount > 0 && allHumanVoted {
+		r.StartGame()
+	}
+}
+
 func (r *Room) KickPlayer(currentHostID string, targetPlayerID string) {
 	if len(r.State.Players) == 0 || r.State.Players[0].ID != currentHostID {
 		return
@@ -717,7 +745,8 @@ func (r *Room) CheckAI() {
 			time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
 				r.Mutex.Lock()
 				defer r.Mutex.Unlock()
-				if r.State.PendingWildColorPlayerIndex != nil && r.State.Players[*r.State.PendingWildColorPlayerIndex].ID == pID {
+				idx := r.State.PendingWildColorPlayerIndex
+				if idx != nil && *idx < len(r.State.Players) && r.State.Players[*idx].ID == pID {
 					colors := []CardColor{Red, Blue, Green, Yellow}
 					counts := make([]int, 4)
 					for _, c := range r.State.Players[*r.State.PendingWildColorPlayerIndex].Hand {
@@ -764,7 +793,7 @@ func (r *Room) CheckAI() {
 		r.Mutex.Lock()
 		defer r.Mutex.Unlock()
 		
-		if r.State.Status != Playing || r.State.Players[r.State.CurrentPlayerIndex].ID != pID {
+		if r.State.Status != Playing || r.State.CurrentPlayerIndex >= len(r.State.Players) || r.State.Players[r.State.CurrentPlayerIndex].ID != pID {
 			return
 		}
 		if r.State.IsReverseActive || r.State.JumpInPlayerID != "" || r.State.PendingWildColorPlayerIndex != nil {

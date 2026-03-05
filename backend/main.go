@@ -65,6 +65,7 @@ func NewRoom(code string) *Room {
 			Players: []Player{},
 			Deck: []CardData{},
 			DiscardPile: []CardData{},
+			PlayAgainVotes: make(map[string]bool),
 		},
 	}
 }
@@ -616,6 +617,13 @@ func (c *Client) handleMessage(msg Message) {
 		r := c.Room
 		r.Mutex.Unlock()
 		r.UpdateState()
+
+	case "VOTE_PLAY_AGAIN":
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.VotePlayAgain(c.ID)
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
 	}
 }
 

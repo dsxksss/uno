@@ -2447,28 +2447,82 @@ export default function App() {
               })}
             </div>
 
-            <div className="flex flex-row items-center justify-center gap-6 mt-16 w-full pointer-events-auto">
-              <button
-                onClick={leaveGame}
-                className="px-8 py-4 bg-zinc-800 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-700 transition-all border border-white/5 shadow-xl active:scale-95 text-lg"
-              >
-                返回主菜单
-              </button>
+            <div className="flex flex-col items-center gap-4 mt-16 w-full pointer-events-auto">
+              {/* Vote progress */}
+              {(() => {
+                const votes = gameState.playAgainVotes || {};
+                const humanPlayers = gameState.players.filter(p => !p.id.startsWith('ai-'));
+                const voteCount = humanPlayers.filter(p => votes[p.id]).length;
+                const totalHumans = humanPlayers.length;
+                const myVote = me ? votes[me.id] : false;
 
-              {gameState.players[0]?.isLocal && (
-                <button
-                  onClick={startGame}
-                  className="px-10 py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-400 transition-all shadow-xl shadow-emerald-500/20 active:scale-95 animate-bounce-short text-lg"
-                >
-                  再来一局
-                </button>
-              )}
+                return (
+                  <>
+                    {/* Vote status bar */}
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="flex -space-x-2">
+                        {humanPlayers.map(p => (
+                          <div
+                            key={p.id}
+                            className={cn(
+                              "w-10 h-10 rounded-full border-2 flex items-center justify-center text-sm font-black transition-all duration-300",
+                              votes[p.id]
+                                ? "bg-emerald-500 border-emerald-400 text-white scale-110 shadow-lg shadow-emerald-500/30"
+                                : "bg-zinc-800 border-zinc-700 text-zinc-500"
+                            )}
+                            title={`${p.name}: ${votes[p.id] ? '已投票' : '未投票'}`}
+                          >
+                            {votes[p.id] ? '✓' : p.name.charAt(0).toUpperCase()}
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-zinc-400 text-sm font-bold uppercase tracking-widest">
+                        {voteCount}/{totalHumans} 已投票
+                      </span>
+                    </div>
 
-              {!gameState.players[0]?.isLocal && (
-                <div className="px-8 py-4 bg-zinc-900/50 text-zinc-400 rounded-2xl font-bold uppercase tracking-widest border border-white/5 italic text-sm">
-                  等待房主重新开始...
-                </div>
-              )}
+                    {/* Progress bar */}
+                    <div className="w-64 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${totalHumans > 0 ? (voteCount / totalHumans) * 100 : 0}%` }}
+                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full"
+                        transition={{ type: "spring", damping: 20 }}
+                      />
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="flex flex-row items-center justify-center gap-6 mt-4">
+                      <button
+                        onClick={leaveGame}
+                        className="px-8 py-4 bg-zinc-800 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-700 transition-all border border-white/5 shadow-xl active:scale-95 text-lg"
+                      >
+                        返回主菜单
+                      </button>
+
+                      {!isSpectator && (
+                        <button
+                          onClick={() => {
+                            if (!myVote && socketRef.current?.readyState === WebSocket.OPEN) {
+                              socketRef.current.send(JSON.stringify({ type: 'VOTE_PLAY_AGAIN' }));
+                              playSound('click');
+                            }
+                          }}
+                          disabled={!!myVote}
+                          className={cn(
+                            "px-10 py-4 rounded-2xl font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 text-lg",
+                            myVote
+                              ? "bg-zinc-700 text-zinc-400 cursor-default shadow-none"
+                              : "bg-emerald-500 text-white hover:bg-emerald-400 shadow-emerald-500/20 animate-bounce-short"
+                          )}
+                        >
+                          {myVote ? "✓ 已投票" : "再来一局"}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

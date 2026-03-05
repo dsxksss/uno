@@ -48,4 +48,5 @@ export interface GameState {
   playerLeftMessage?: string;
   hostChangeMessage?: string;
   kickMessage?: string;
+  playAgainVotes?: Record<string, boolean>;
 }
