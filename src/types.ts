@@ -24,6 +24,7 @@ export interface Player {
   isLocal: boolean;
   hasShoutedUNO: boolean;
   difficulty?: Difficulty;
+  isReady: boolean;
 }
 
 export interface GameState {

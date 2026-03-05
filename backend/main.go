@@ -376,11 +376,39 @@ func (c *Client) handleMessage(msg Message) {
 		c.Room.Mutex.Lock()
 		// Only host (first player) can start
 		if len(c.Room.State.Players) > 0 && c.Room.State.Players[0].ID == c.ID {
-			c.Room.StartGame()
+			// Check if everyone (except bots) is ready
+			allReady := true
+			for i, p := range c.Room.State.Players {
+				// Host is always considered ready to start if they click Start
+				if i == 0 { continue }
+				// AI is always ready
+				if startsWith(p.ID, "ai-") { continue }
+				
+				if !p.IsReady {
+					allReady = false
+					break
+				}
+			}
+			
+			if allReady {
+				c.Room.StartGame()
+			}
 		}
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
 		
+	case "TOGGLE_READY":
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		for i, p := range c.Room.State.Players {
+			if p.ID == c.ID {
+				c.Room.State.Players[i].IsReady = !c.Room.State.Players[i].IsReady
+				break
+			}
+		}
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
+
 	case "UPDATE_AI_SETTINGS":
 		var payload struct {
 			AiCount    int        `json:"aiCount"`

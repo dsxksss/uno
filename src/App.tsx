@@ -461,6 +461,12 @@ export default function App() {
     socketRef.current.send(JSON.stringify({ type: 'SHOUT_UNO' }));
   };
 
+  const toggleReady = () => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    playSound('click');
+  };
+
   // Countdown sound control
   useEffect(() => {
     if (gameState.status !== 'playing') {
@@ -974,22 +980,51 @@ export default function App() {
                           initial={{ x: -20, opacity: 0 }}
                           animate={{ x: 0, opacity: 1 }}
                           key={p.id}
-                          className="flex items-center justify-between bg-zinc-800/50 p-2.5 rounded-xl border border-white/5"
+                          className={cn(
+                            "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+                            index === 0 ? "bg-emerald-500/10 border-emerald-500/20" :
+                              (p.id.startsWith('ai-') || p.isReady) ? "bg-zinc-800/80 border-emerald-500/30" : "bg-zinc-800/50 border-white/5"
+                          )}
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-base">{p.name}</span>
-                            {p.isLocal && <span className="text-[12px] text-zinc-500 font-bold">(你)</span>}
-                            {index === 0 && <span className="text-[12px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">房主</span>}
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              {index === 0 ? (
+                                <div className="p-1.5 bg-emerald-500 rounded-lg shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                                  <Trophy size={14} className="text-white" />
+                                </div>
+                              ) : p.id.startsWith('ai-') || p.isReady ? (
+                                <div className="p-1.5 bg-emerald-500/20 border border-emerald-500/40 rounded-lg">
+                                  <Check size={14} className="text-emerald-500" />
+                                </div>
+                              ) : (
+                                <div className="p-1.5 bg-zinc-700/50 border border-white/10 rounded-lg">
+                                  <div className="w-3.5 h-3.5" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2">
+                                <span className={cn(
+                                  "font-bold text-base",
+                                  index === 0 ? "text-emerald-400" : "text-white"
+                                )}>{p.name}</span>
+                                {p.isLocal && <span className="text-[12px] text-zinc-500 font-bold">(你)</span>}
+                                {index === 0 && <span className="text-[11px] font-black uppercase tracking-tighter text-emerald-500 opacity-70">房主</span>}
+                              </div>
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                                {index === 0 ? "总指挥" : (p.id.startsWith('ai-') || p.isReady ? "已准备" : "待命中")}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {/* Only host can kick others */}
-                            {gameState.players[0]?.isLocal && !p.isLocal && (
+                            {/* Kick button for host */}
+                            {isHost && !p.isLocal && (
                               <button
                                 onClick={() => kickPlayer(p.id)}
-                                className="p-1.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm"
-                                title="踢出玩家"
+                                className="p-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm group"
+                                title="踢出"
                               >
-                                <LogOut size={12} />
+                                <LogOut size={14} className="group-hover:translate-x-0.5 transition-transform" />
                               </button>
                             )}
                           </div>
@@ -1025,28 +1060,48 @@ export default function App() {
                   </div>
 
                   <div className="flex gap-4">
+                    {!isHost ? (
+                      <button
+                        onClick={toggleReady}
+                        onMouseEnter={() => playSound('btnHover')}
+                        className={cn(
+                          "flex-[3] flex items-center justify-center gap-2 font-black py-4 rounded-xl transition-all shadow-xl text-base active:scale-95",
+                          me?.isReady
+                            ? "bg-zinc-700 text-white border-2 border-white/10 hover:bg-zinc-600"
+                            : "bg-emerald-500 text-white hover:scale-[1.03] shadow-emerald-500/20"
+                        )}
+                      >
+                        {me?.isReady ? (
+                          <>
+                            <RefreshCw size={18} className="animate-spin-slow" /> 取消准备
+                          </>
+                        ) : (
+                          <>
+                            <Check size={18} /> 准备开始
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={startGame}
+                        disabled={gameState.players.length < 2 || !gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady)}
+                        onMouseEnter={() => playSound('btnHover')}
+                        className={cn(
+                          "flex-[3] flex items-center justify-center gap-2 font-black py-4 rounded-xl transition-all shadow-xl text-base",
+                          (gameState.players.length >= 2 && gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady))
+                            ? "bg-emerald-500 text-white hover:scale-[1.03] shadow-emerald-500/30 active:scale-95 cursor-pointer"
+                            : "bg-zinc-800 text-zinc-600 cursor-not-allowed border border-white/5 opacity-50"
+                        )}
+                      >
+                        <Play size={18} fill="currentColor" /> 开始游戏
+                      </button>
+                    )}
                     <button
                       onClick={leaveLobby}
                       onMouseEnter={() => playSound('btnHover')}
-                      className="flex-1 flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 font-bold py-3 rounded-xl hover:bg-zinc-700 hover:text-white transition-all active:scale-95"
+                      className="flex-1 flex items-center justify-center gap-2 bg-zinc-900 border border-white/10 text-zinc-500 font-bold py-4 rounded-xl hover:bg-zinc-800 hover:text-white transition-all active:scale-95"
                     >
-                      <ChevronLeft size={18} /> 返回
-                    </button>
-                    <button
-                      onClick={startGame}
-                      disabled={!isHost || gameState.players.length < 2}
-                      onMouseEnter={() => playSound('btnHover')}
-                      className={cn(
-                        "flex-[2] flex items-center justify-center gap-2 bg-emerald-500 text-white font-black py-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_10px_30px_rgba(16,185,129,0.2)] text-base"
-                      )}
-                    >
-                      {isHost ? (
-                        <>
-                          <Play size={18} fill="currentColor" /> 开始游戏
-                        </>
-                      ) : (
-                        "等待开始..."
-                      )}
+                      <LogOut size={18} /> 退出
                     </button>
                   </div>
                 </div>

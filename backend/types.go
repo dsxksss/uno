@@ -52,6 +52,7 @@ type Player struct {
 	IsLocal        bool       `json:"isLocal"`
 	HasShoutedUno  bool       `json:"hasShoutedUNO"`
 	Difficulty     Difficulty `json:"difficulty,omitempty"`
+	IsReady        bool       `json:"isReady"`
 }
 
 type GameStatus string
