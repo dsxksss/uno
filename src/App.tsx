@@ -1119,7 +1119,7 @@ export default function App() {
                                 {index === 0 && <span className="text-[11px] font-black uppercase tracking-tighter text-emerald-500 opacity-70">房主</span>}
                               </div>
                               <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                                {index === 0 ? "房主" : (p.id.startsWith('ai-') || p.isReady ? "已准备" : "待准备")}
+                                {index === 0 ? "房主已准备" : (p.id.startsWith('ai-') || p.isReady ? "已准备" : "待准备")}
                               </span>
                             </div>
                           </div>
