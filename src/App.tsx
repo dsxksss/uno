@@ -126,6 +126,16 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
   const [hostTransferTarget, setHostTransferTarget] = useState<{ id: string, name: string } | null>(null);
+  const [alertModal, setAlertModal] = useState<{
+    title: string;
+    message: string;
+    type: 'alert' | 'confirm';
+    onConfirm: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    color?: 'emerald' | 'amber' | 'red' | 'blue';
+  } | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as any;
@@ -142,7 +152,12 @@ export default function App() {
       } else {
         // Fallback for iOS iPhone where Fullscreen API for elements isn't supported
         // Suggesting "Add to Home Screen" is often the only real way there
-        alert("此浏览器不支持全屏 API。在 iPhone 上，请使用 Safari 的 '添加到主屏幕' 功能以获得全屏体验。");
+        setAlertModal({
+          title: "全屏不可用",
+          message: "此浏览器不支持全屏 API。在 iPhone 上，请使用 Safari 的 '添加到主屏幕' 功能以获得全屏体验。",
+          type: 'alert',
+          onConfirm: () => setAlertModal(null)
+        });
       }
     } else {
       const exitFullscreen = doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen || doc.msExitFullscreen;
@@ -273,8 +288,25 @@ export default function App() {
         } else {
           playSound('hover'); // Ready players get a subtle notification
         }
+      } else if (msg.type === 'KICKED') {
+        setAlertModal({
+          title: "被踢出房间",
+          message: "你已被房主移出房间。",
+          type: 'alert',
+          color: 'red',
+          onConfirm: () => {
+            setAlertModal(null);
+            window.location.reload();
+          }
+        });
       } else if (msg.type === 'ERROR') {
-        alert(msg.payload.message);
+        setAlertModal({
+          title: "错误",
+          message: msg.payload.message || "发生了一个未知错误",
+          type: 'alert',
+          color: 'red',
+          onConfirm: () => setAlertModal(null)
+        });
       }
     };
 
@@ -367,17 +399,6 @@ export default function App() {
     playSound('click');
   };
 
-  const kickPlayer = (id: string) => {
-    setGameState(prev => {
-      const newPlayers = prev.players.filter(p => p.id !== id);
-      // Adjust aiCount if it was a bot
-      if (id.startsWith('ai-')) {
-        setAiCount(newPlayers.filter(p => p.id.startsWith('ai-')).length);
-      }
-      return { ...prev, players: newPlayers };
-    });
-    playSound('click');
-  };
 
   const forceWin = () => {
     const winnerName = gameState.players[gameState.currentPlayerIndex]?.name || '未知';
@@ -417,6 +438,11 @@ export default function App() {
     setSeeAllHands(false);
     setDevClicks(0);
     setAiCount(0);
+
+    // Request fresh room list immediately after returning to lobby
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
+    }
     playSound('click');
   };
 
@@ -444,6 +470,11 @@ export default function App() {
     setSeeAllHands(false);
     setDevClicks(0);
     setAiCount(0);
+
+    // Request fresh room list immediately after returning to lobby
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'GET_ROOM_LIST' }));
+    }
   };
 
   const startGame = () => {
@@ -452,13 +483,45 @@ export default function App() {
     // Special check for restarting after game ends: if not enough players are left (e.g., someone left during the game),
     // show a prompt and return to the main menu as requested.
     if (gameState.status === 'ended' && gameState.players.length < 2) {
-      alert("其他玩家已全部离开，无法重新开始，请重新创建或加入房间。");
-      leaveGame();
+      setAlertModal({
+        title: "无法重开",
+        message: "其他玩家已全部离开，无法重新开始，请重新创建或加入房间。",
+        type: 'alert',
+        onConfirm: () => {
+          setAlertModal(null);
+          leaveGame();
+        }
+      });
       return;
     }
 
     socketRef.current.send(JSON.stringify({ type: 'START_GAME' }));
     playSound('click');
+  };
+
+  const kickPlayer = (targetPlayerId: string) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+
+    // Find player name for confirmation
+    const target = [...gameState.players, ...gameState.spectators].find(p => p.id === targetPlayerId);
+    if (!target) return;
+
+    setAlertModal({
+      title: "踢出玩家",
+      message: `确定要将玩家 "${target.name}" 踢出房间吗？`,
+      type: 'confirm',
+      color: 'red',
+      confirmText: "确定踢出",
+      onConfirm: () => {
+        socketRef.current?.send(JSON.stringify({
+          type: 'KICK_PLAYER',
+          payload: { targetPlayerId }
+        }));
+        playSound('click');
+        setAlertModal(null);
+      },
+      onCancel: () => setAlertModal(null)
+    });
   };
 
   const playCard = (cardId: string) => {
@@ -1257,21 +1320,23 @@ export default function App() {
             transition={{ duration: 0.4, ease: "easeInOut" }}
             className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 text-white relative"
           >
-            {/* Host Change & Player Left Overlays */}
+            {/* Host Change, Player Left & Kick Overlays */}
             <AnimatePresence>
-              {(gameState.playerLeftMessage || gameState.hostChangeMessage) && (
+              {(gameState.playerLeftMessage || gameState.hostChangeMessage || gameState.kickMessage) && (
                 <motion.div
                   initial={{ opacity: 0, y: -50 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -50 }}
                   className={cn(
-                    "absolute top-20 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-full shadow-2xl border-4 border-white flex items-center gap-3",
-                    gameState.hostChangeMessage ? "bg-emerald-500 shadow-emerald-500/50" : "bg-orange-500 shadow-orange-500/50"
+                    "absolute top-20 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-full shadow-2xl border-4 border-white flex items-center gap-3 whitespace-nowrap",
+                    gameState.hostChangeMessage ? "bg-emerald-500 shadow-emerald-500/50" :
+                      gameState.kickMessage ? "bg-red-500 shadow-red-500/50" : "bg-orange-500 shadow-orange-500/50"
                   )}
                 >
-                  {gameState.hostChangeMessage ? <Trophy size={24} /> : <LogOut size={24} />}
-                  <span className="text-xl font-black tracking-widest">
-                    {gameState.hostChangeMessage || gameState.playerLeftMessage}
+                  {gameState.hostChangeMessage ? <Trophy size={24} /> :
+                    gameState.kickMessage ? <LogOut size={24} /> : <LogOut size={24} />}
+                  <span className="text-xl font-black tracking-widest text-white">
+                    {gameState.hostChangeMessage || gameState.kickMessage || gameState.playerLeftMessage}
                   </span>
                 </motion.div>
               )}
@@ -2518,6 +2583,71 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Unified Alert/Confirm Modal */}
+      <AnimatePresence>
+        {alertModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className={cn(
+                "bg-zinc-950 border-2 rounded-[40px] p-8 max-w-sm w-full shadow-[0_30px_60px_rgba(0,0,0,0.5)] flex flex-col items-center text-center gap-6",
+                alertModal.color === 'red' ? "border-red-500/50" :
+                  alertModal.color === 'amber' ? "border-amber-500/50" :
+                    alertModal.color === 'blue' ? "border-blue-500/50" : "border-emerald-500/50"
+              )}
+            >
+              <div className={cn(
+                "p-4 rounded-full",
+                alertModal.color === 'red' ? "bg-red-500/10 text-red-500" :
+                  alertModal.color === 'amber' ? "bg-amber-500/10 text-amber-500" :
+                    alertModal.color === 'blue' ? "bg-blue-500/10 text-blue-500" : "bg-emerald-500/10 text-emerald-500"
+              )}>
+                <Zap size={32} />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-white font-black italic tracking-tighter text-2xl uppercase">{alertModal.title}</h3>
+                <p className="text-zinc-400 text-sm font-bold uppercase tracking-widest leading-relaxed">
+                  {alertModal.message}
+                </p>
+              </div>
+
+              <div className="flex w-full gap-3 mt-2">
+                {alertModal.type === 'confirm' && (
+                  <button
+                    onClick={() => {
+                      if (alertModal.onCancel) alertModal.onCancel();
+                      else setAlertModal(null);
+                    }}
+                    className="flex-1 px-6 py-4 bg-zinc-900 text-zinc-500 rounded-2xl text-base font-black uppercase tracking-widest hover:bg-zinc-800 hover:text-white transition-all active:scale-95"
+                  >
+                    {alertModal.cancelText || "取消"}
+                  </button>
+                )}
+                <button
+                  onClick={alertModal.onConfirm}
+                  className={cn(
+                    "flex-1 px-6 py-4 text-white rounded-2xl text-base font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg",
+                    alertModal.color === 'red' ? "bg-red-500 hover:bg-red-400 shadow-red-500/20" :
+                      alertModal.color === 'amber' ? "bg-amber-500 hover:bg-amber-400 shadow-amber-500/20" :
+                        alertModal.color === 'blue' ? "bg-blue-500 hover:bg-blue-400 shadow-blue-500/20" : "bg-emerald-500 hover:bg-emerald-400 shadow-emerald-500/20"
+                  )}
+                >
+                  {alertModal.confirmText || (alertModal.type === 'alert' ? "我知道了" : "确定")}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

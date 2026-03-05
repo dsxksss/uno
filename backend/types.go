@@ -83,4 +83,5 @@ type GameState struct {
 	IsDevMode                   bool       `json:"isDevMode"`
 	PlayerLeftMessage           string     `json:"playerLeftMessage,omitempty"`
 	HostChangeMessage           string     `json:"hostChangeMessage,omitempty"`
+	KickMessage                 string     `json:"kickMessage,omitempty"`
 }

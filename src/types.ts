@@ -47,4 +47,5 @@ export interface GameState {
   isDevMode: boolean;
   playerLeftMessage?: string;
   hostChangeMessage?: string;
+  kickMessage?: string;
 }

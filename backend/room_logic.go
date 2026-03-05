@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
@@ -595,6 +596,67 @@ func (r *Room) TransferHost(currentHostID string, targetPlayerID string) {
 	time.AfterFunc(3*time.Second, func() {
 		r.Mutex.Lock()
 		r.State.HostChangeMessage = ""
+		r.Mutex.Unlock()
+		r.UpdateState()
+	})
+}
+
+func (r *Room) KickPlayer(currentHostID string, targetPlayerID string) {
+	if len(r.State.Players) == 0 || r.State.Players[0].ID != currentHostID {
+		return
+	}
+
+	if currentHostID == targetPlayerID {
+		return
+	}
+
+	// 1. First, tell the target they are kicked by broadcasting a specific message
+	// Or we can just set a special state field.
+	var targetName string
+	for _, p := range r.State.Players {
+		if p.ID == targetPlayerID {
+			targetName = p.Name
+			break
+		}
+	}
+	if targetName == "" {
+		for _, p := range r.State.Spectators {
+			if p.ID == targetPlayerID {
+				targetName = p.Name
+				break
+			}
+		}
+	}
+
+	if targetName == "" {
+		return
+	}
+
+	// Set kick message for everyone to see
+	r.State.KickMessage = fmt.Sprintf("房主已将 %s 移出房间", targetName)
+	
+	// Create a message specifically for the kicked person if needed, 
+	// but UpdateState will reach them before they are removed from Clients map.
+	
+	// 2. Perform Removal
+	r.RemovePlayer(targetPlayerID)
+	
+	// 3. Close their connection
+	if client, ok := r.Clients[targetPlayerID]; ok {
+		// Send a final state update so they see the kick message before closure
+		// We'll give it a tiny delay in the read/write pump usually, 
+		// but here we can just delete from map after update.
+		delete(r.Clients, targetPlayerID)
+		
+		// Optional: send explicit KICKED message
+		kickNotify, _ := json.Marshal(Message{Type: "KICKED"})
+		client.Send <- kickNotify
+	}
+
+	// Clear message after 3 seconds
+	time.AfterFunc(3*time.Second, func() {
+		r.Mutex.Lock()
+		r.State.KickMessage = ""
 		r.Mutex.Unlock()
 		r.UpdateState()
 	})

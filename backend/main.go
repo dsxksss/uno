@@ -44,8 +44,10 @@ type Room struct {
 }
 
 var (
-	rooms      = make(map[string]*Room)
-	roomsMutex sync.Mutex
+	rooms         = make(map[string]*Room)
+	roomsMutex    sync.Mutex
+	globalClients = make(map[string]*Client)
+	clientsMutex  sync.Mutex
 )
 
 func NewRoom(code string) *Room {
@@ -192,6 +194,49 @@ func startPeriodicCleanup() {
 	}()
 }
 
+func startPeriodicRoomListBroadcast() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			roomsMutex.Lock()
+			roomList := make([]map[string]interface{}, 0, len(rooms))
+			for _, room := range rooms {
+				room.Mutex.Lock()
+				roomList = append(roomList, map[string]interface{}{
+					"code":        room.Code,
+					"playerCount": len(room.State.Players),
+				})
+				room.Mutex.Unlock()
+			}
+			roomsMutex.Unlock()
+
+			if len(roomList) == 0 && len(globalClients) == 0 {
+				continue
+			}
+
+			payload, _ := json.Marshal(map[string]interface{}{
+				"rooms": roomList,
+			})
+			msg, _ := json.Marshal(Message{
+				Type:    "ROOM_LIST",
+				Payload: payload,
+			})
+
+			clientsMutex.Lock()
+			for _, client := range globalClients {
+				// Only send to clients who are not in a room (in the lobby)
+				if client.Room == nil {
+					select {
+					case client.Send <- msg:
+					default:
+					}
+				}
+			}
+			clientsMutex.Unlock()
+		}
+	}()
+}
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -204,6 +249,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Conn: conn,
 		Send: make(chan []byte, 512),
 	}
+
+	clientsMutex.Lock()
+	globalClients[client.ID] = client
+	clientsMutex.Unlock()
 
 	go client.writePump()
 	go client.readPump()
@@ -224,6 +273,11 @@ func (c *Client) readPump() {
 			c.Room.UpdateState()
 			c.Room.cleanupIfAbandoned()
 		}
+		
+		clientsMutex.Lock()
+		delete(globalClients, c.ID)
+		clientsMutex.Unlock()
+
 		c.Conn.Close()
 	}()
 
@@ -549,6 +603,19 @@ func (c *Client) handleMessage(msg Message) {
 		c.Room.TransferHost(c.ID, payload.TargetPlayerID)
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
+
+	case "KICK_PLAYER":
+		var payload struct {
+			TargetPlayerID string `json:"targetPlayerId"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.KickPlayer(c.ID, payload.TargetPlayerID)
+		r := c.Room
+		r.Mutex.Unlock()
+		r.UpdateState()
 	}
 }
 
@@ -560,6 +627,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	
 	startPeriodicCleanup()
+	startPeriodicRoomListBroadcast()
 	
 	http.HandleFunc("/ws", handleWebSocket)
 	
