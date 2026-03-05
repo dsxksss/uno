@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Card } from './components/Card';
 import { CardData, GameState, cn, CardColor, Difficulty } from './types';
 import { createDeck, canPlayCard, canJumpIn, isNumberCard } from './utils';
-import { Users, Plus, Play, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize } from 'lucide-react';
+import { Users, Plus, Play, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize, Crown } from 'lucide-react';
 import { Howl } from 'howler';
 
 // Sound effects - Organic, thumpy "dong dong" style (no mechanical sounds)
@@ -125,6 +125,7 @@ export default function App() {
   const [isScalingMode, setIsScalingMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
+  const [hostTransferTarget, setHostTransferTarget] = useState<{ id: string, name: string } | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as any;
@@ -259,7 +260,19 @@ export default function App() {
       } else if (msg.type === 'REMIND_READY') {
         setShowReadyReminder(true);
         setTimeout(() => setShowReadyReminder(false), 3000);
-        playSound('uno'); // Use UNO shout as a loud attention getter
+
+        // Find local player status
+        const isHost = gameState.players[0]?.id === clientIdRef.current;
+        const me = gameState.players.find((p: any) => p.id === clientIdRef.current);
+        const isReady = me?.isReady || false;
+
+        if (isHost) {
+          playSound('click'); // Host gets a simple confirmation click
+        } else if (!isReady) {
+          playSound('uno'); // Non-ready players get the loud shout
+        } else {
+          playSound('hover'); // Ready players get a subtle notification
+        }
       } else if (msg.type === 'ERROR') {
         alert(msg.payload.message);
       }
@@ -435,6 +448,15 @@ export default function App() {
 
   const startGame = () => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+
+    // Special check for restarting after game ends: if not enough players are left (e.g., someone left during the game),
+    // show a prompt and return to the main menu as requested.
+    if (gameState.status === 'ended' && gameState.players.length < 2) {
+      alert("其他玩家已全部离开，无法重新开始，请重新创建或加入房间。");
+      leaveGame();
+      return;
+    }
+
     socketRef.current.send(JSON.stringify({ type: 'START_GAME' }));
     playSound('click');
   };
@@ -472,12 +494,20 @@ export default function App() {
     playSound('click');
   };
 
-  const transferHost = (targetPlayerId: string) => {
-    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+  const transferHost = (targetPlayerId: string, targetName: string) => {
+    setHostTransferTarget({ id: targetPlayerId, name: targetName });
+    playSound('click');
+  };
+
+  const confirmTransferHost = () => {
+    if (!hostTransferTarget || socketRef.current?.readyState !== WebSocket.OPEN) return;
+
     socketRef.current.send(JSON.stringify({
       type: 'TRANSFER_HOST',
-      payload: { targetPlayerId }
+      payload: { targetPlayerId: hostTransferTarget.id }
     }));
+
+    setHostTransferTarget(null);
     playSound('click');
   };
 
@@ -1036,11 +1066,11 @@ export default function App() {
                               <div className="flex items-center gap-1.5">
                                 {!p.id.startsWith('ai-') && (
                                   <button
-                                    onClick={() => transferHost(p.id)}
-                                    className="p-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-white transition-all shadow-sm group"
-                                    title="转移房主"
+                                    onClick={() => transferHost(p.id, p.name)}
+                                    className="p-2 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-lg hover:bg-amber-500 hover:text-white transition-all shadow-sm group"
+                                    title="转让房主"
                                   >
-                                    <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                                    <Crown size={14} className="group-hover:scale-110 transition-transform" />
                                   </button>
                                 )}
                                 <button
@@ -1099,10 +1129,10 @@ export default function App() {
                             className="bg-yellow-400 border-8 border-black p-8 rounded-[40px] shadow-[20px_20px_0_rgba(0,0,0,1)] -rotate-3"
                           >
                             <h3 className="text-6xl font-black italic tracking-tighter text-black uppercase">
-                              快准备！
+                              {isHost ? "已发送提醒" : (me?.isReady ? "正在催促其他人准备..." : "快准备！")}
                             </h3>
                             <div className="mt-4 bg-black text-white px-6 py-2 rounded-full font-bold text-center">
-                              房主正在等你...
+                              {isHost ? "正在等待其他玩家..." : (me?.isReady ? "房主正在催促其他人..." : "房主正在等你...")}
                             </div>
                           </motion.div>
 
@@ -2447,6 +2477,44 @@ export default function App() {
                   className="text-zinc-500 text-[12px] font-bold uppercase tracking-widest hover:text-white"
                 >
                   关闭
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Host Transfer Confirmation Prompt */}
+      <AnimatePresence>
+        {hostTransferTarget && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[5001] w-[90%] max-w-sm pointer-events-auto"
+          >
+            <div className="bg-zinc-900 border-2 border-amber-500/50 p-6 rounded-[32px] shadow-[0_30px_60px_rgba(0,0,0,0.8)] flex flex-col items-center text-center gap-6">
+              <div className="p-4 bg-amber-500/10 rounded-full">
+                <Crown className="text-amber-500" size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-white font-black italic tracking-tighter text-2xl uppercase">转让房主权限</h3>
+                <p className="text-zinc-400 text-sm font-bold uppercase tracking-widest leading-relaxed">
+                  你确定要让 <span className="text-amber-400">"{hostTransferTarget.name}"</span> 成为下一任房主吗？
+                </p>
+              </div>
+              <div className="flex w-full gap-3 mt-2">
+                <button
+                  onClick={() => setHostTransferTarget(null)}
+                  className="flex-1 px-6 py-4 bg-zinc-800 text-zinc-400 rounded-2xl text-base font-black uppercase tracking-widest hover:bg-zinc-700 hover:text-white transition-all shadow-xl active:scale-95"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={confirmTransferHost}
+                  className="flex-1 px-6 py-4 bg-amber-500 text-white rounded-2xl text-base font-black uppercase tracking-widest hover:bg-amber-400 hover:scale-[1.02] transition-all shadow-[0_10px_20px_rgba(245,158,11,0.3)] active:scale-95"
+                >
+                  确定转让
                 </button>
               </div>
             </div>

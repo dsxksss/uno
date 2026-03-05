@@ -391,7 +391,18 @@ func (c *Client) handleMessage(msg Message) {
 			}
 			
 			if allReady {
-				c.Room.StartGame()
+				if len(c.Room.State.Players) < 2 {
+					errorPayload, _ := json.Marshal(map[string]string{
+						"message": "房间人数不足，至少需要 2 人（含机器人）才能开始游戏",
+					})
+					errorMsg, _ := json.Marshal(Message{
+						Type:    "ERROR",
+						Payload: errorPayload,
+					})
+					c.Send <- errorMsg
+				} else {
+					c.Room.StartGame()
+				}
 			} else {
 				// Broadcast reminder
 				remindMsg, _ := json.Marshal(Message{
