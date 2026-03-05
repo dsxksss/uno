@@ -46,4 +46,5 @@ export interface GameState {
   isReverseActive: boolean;
   isDevMode: boolean;
   playerLeftMessage?: string;
+  hostChangeMessage?: string;
 }

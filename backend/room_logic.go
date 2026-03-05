@@ -504,6 +504,9 @@ func (r *Room) RemovePlayer(playerID string) {
 	}
 
 	// Ensure Host priority: If players[0] is AI but there are humans, swap
+	hostChanged := false
+	var newHostName string
+
 	if len(r.State.Players) > 0 && !startsWith(r.State.Players[0].ID, "ai-") {
 		// Already a human host
 	} else if len(r.State.Players) > 1 {
@@ -513,6 +516,8 @@ func (r *Room) RemovePlayer(playerID string) {
 			}
 			// Found a human, swap to host
 			r.State.Players[0], r.State.Players[i] = r.State.Players[i], r.State.Players[0]
+			hostChanged = true
+			newHostName = r.State.Players[0].Name
 			
 			// If playing, we must also adjust CurrentPlayerIndex to follow the player!
 			if r.State.Status == Playing {
@@ -537,10 +542,62 @@ func (r *Room) RemovePlayer(playerID string) {
 		}
 	}
 
+	if hostChanged {
+		r.State.HostChangeMessage = fmt.Sprintf("房主已离开，%s 成为新任房主", newHostName)
+		time.AfterFunc(3*time.Second, func() {
+			r.Mutex.Lock()
+			r.State.HostChangeMessage = ""
+			r.Mutex.Unlock()
+			r.UpdateState()
+		})
+	}
+
 	// Trigger AI if it's their turn now
 	if r.State.Status == Playing {
 		r.CheckAI()
 	}
+}
+
+func (r *Room) TransferHost(currentHostID string, targetPlayerID string) {
+	if len(r.State.Players) == 0 || r.State.Players[0].ID != currentHostID {
+		return
+	}
+
+	if currentHostID == targetPlayerID {
+		return
+	}
+
+	targetIndex := -1
+	for i, p := range r.State.Players {
+		if p.ID == targetPlayerID {
+			targetIndex = i
+			break
+		}
+	}
+
+	if targetIndex == -1 || startsWith(targetPlayerID, "ai-") {
+		return
+	}
+
+	// Swap indices to make target the host (index 0)
+	r.State.Players[0], r.State.Players[targetIndex] = r.State.Players[targetIndex], r.State.Players[0]
+	
+	// Adjust CurrentPlayerIndex if playing
+	if r.State.Status == Playing {
+		if r.State.CurrentPlayerIndex == 0 {
+			r.State.CurrentPlayerIndex = targetIndex
+		} else if r.State.CurrentPlayerIndex == targetIndex {
+			r.State.CurrentPlayerIndex = 0
+		}
+	}
+
+	r.State.HostChangeMessage = fmt.Sprintf("房主已将权限转让给 %s", r.State.Players[0].Name)
+	time.AfterFunc(3*time.Second, func() {
+		r.Mutex.Lock()
+		r.State.HostChangeMessage = ""
+		r.Mutex.Unlock()
+		r.UpdateState()
+	})
 }
 
 

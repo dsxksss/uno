@@ -392,6 +392,15 @@ func (c *Client) handleMessage(msg Message) {
 			
 			if allReady {
 				c.Room.StartGame()
+			} else {
+				// Broadcast reminder
+				remindMsg, _ := json.Marshal(Message{
+					Type: "REMIND_READY",
+				})
+				select {
+				case c.Room.Broadcast <- remindMsg:
+				case <-time.After(50 * time.Millisecond):
+				}
 			}
 		}
 		c.Room.Mutex.Unlock()
@@ -515,6 +524,18 @@ func (c *Client) handleMessage(msg Message) {
 		if c.Room == nil { return }
 		c.Room.Mutex.Lock()
 		c.Room.ShoutUno(c.ID)
+		c.Room.Mutex.Unlock()
+		c.Room.UpdateState()
+		
+	case "TRANSFER_HOST":
+		var payload struct {
+			TargetPlayerID string `json:"targetPlayerId"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		
+		if c.Room == nil { return }
+		c.Room.Mutex.Lock()
+		c.Room.TransferHost(c.ID, payload.TargetPlayerID)
 		c.Room.Mutex.Unlock()
 		c.Room.UpdateState()
 	}

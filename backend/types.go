@@ -82,4 +82,5 @@ type GameState struct {
 	IsReverseActive             bool       `json:"isReverseActive"`
 	IsDevMode                   bool       `json:"isDevMode"`
 	PlayerLeftMessage           string     `json:"playerLeftMessage,omitempty"`
+	HostChangeMessage           string     `json:"hostChangeMessage,omitempty"`
 }

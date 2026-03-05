@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Card } from './components/Card';
 import { CardData, GameState, cn, CardColor, Difficulty } from './types';
 import { createDeck, canPlayCard, canJumpIn, isNumberCard } from './utils';
-import { Users, Plus, Play, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, ChevronLeft, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize } from 'lucide-react';
+import { Users, Plus, Play, Trophy, RefreshCw, ArrowRight, ArrowLeft, Volume2, VolumeX, Zap, LogOut, Copy, Check, Globe, Smartphone, RotateCw, Maximize, Minimize } from 'lucide-react';
 import { Howl } from 'howler';
 
 // Sound effects - Organic, thumpy "dong dong" style (no mechanical sounds)
@@ -115,6 +115,7 @@ export default function App() {
   const [actionBubble] = useState<{ text: string, color: string } | null>(null);
   const [actionFlash, setActionFlash] = useState<{ color: string, type: string, text: string } | null>(null);
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
+  const [showReadyReminder, setShowReadyReminder] = useState(false);
   const isPendingColor = gameState.pendingWildColorPlayerIndex !== null;
   const lastNumberValue = [...(gameState.discardPile || [])].reverse().find(isNumberCard)?.value || null;
   const isSpectator = gameState.spectators.some(s => s.isLocal);
@@ -255,6 +256,10 @@ export default function App() {
         setGameState(newState);
       } else if (msg.type === 'ROOM_LIST') {
         setActiveRooms(msg.payload.rooms);
+      } else if (msg.type === 'REMIND_READY') {
+        setShowReadyReminder(true);
+        setTimeout(() => setShowReadyReminder(false), 3000);
+        playSound('uno'); // Use UNO shout as a loud attention getter
       } else if (msg.type === 'ERROR') {
         alert(msg.payload.message);
       }
@@ -464,6 +469,15 @@ export default function App() {
   const toggleReady = () => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    playSound('click');
+  };
+
+  const transferHost = (targetPlayerId: string) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'TRANSFER_HOST',
+      payload: { targetPlayerId }
+    }));
     playSound('click');
   };
 
@@ -1017,15 +1031,26 @@ export default function App() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {/* Kick button for host */}
+                            {/* Host transfer and kick buttons */}
                             {isHost && !p.isLocal && (
-                              <button
-                                onClick={() => kickPlayer(p.id)}
-                                className="p-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm group"
-                                title="踢出"
-                              >
-                                <LogOut size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {!p.id.startsWith('ai-') && (
+                                  <button
+                                    onClick={() => transferHost(p.id)}
+                                    className="p-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-white transition-all shadow-sm group"
+                                    title="转移房主"
+                                  >
+                                    <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => kickPlayer(p.id)}
+                                  className="p-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm group"
+                                  title="踢出"
+                                >
+                                  <LogOut size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                                </button>
+                              </div>
                             )}
                           </div>
                         </motion.div>
@@ -1059,6 +1084,36 @@ export default function App() {
                     </div>
                   </div>
 
+                  <AnimatePresence>
+                    {showReadyReminder && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.5, rotate: -10 }}
+                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                        exit={{ opacity: 0, scale: 1.5, rotate: 10 }}
+                        className="absolute inset-0 z-[110] flex items-center justify-center pointer-events-none"
+                      >
+                        <div className="relative">
+                          <motion.div
+                            animate={{ scale: [1, 1.1, 1] }}
+                            transition={{ duration: 0.5, repeat: Infinity }}
+                            className="bg-yellow-400 border-8 border-black p-8 rounded-[40px] shadow-[20px_20px_0_rgba(0,0,0,1)] -rotate-3"
+                          >
+                            <h3 className="text-6xl font-black italic tracking-tighter text-black uppercase">
+                              快准备！
+                            </h3>
+                            <div className="mt-4 bg-black text-white px-6 py-2 rounded-full font-bold text-center">
+                              房主正在等你...
+                            </div>
+                          </motion.div>
+
+                          {/* Comic decorative elements */}
+                          <div className="absolute -top-10 -right-10 w-20 h-20 bg-red-500 rounded-full border-4 border-black animate-bounce" />
+                          <div className="absolute -bottom-6 -left-8 w-14 h-14 bg-blue-500 rounded-lg border-4 border-black rotate-12" />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   <div className="flex gap-4">
                     {!isHost ? (
                       <button
@@ -1084,16 +1139,26 @@ export default function App() {
                     ) : (
                       <button
                         onClick={startGame}
-                        disabled={gameState.players.length < 2 || !gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady)}
+                        disabled={gameState.players.length < 2}
                         onMouseEnter={() => playSound('btnHover')}
                         className={cn(
                           "flex-[3] flex items-center justify-center gap-2 font-black py-4 rounded-xl transition-all shadow-xl text-base",
-                          (gameState.players.length >= 2 && gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady))
-                            ? "bg-emerald-500 text-white hover:scale-[1.03] shadow-emerald-500/30 active:scale-95 cursor-pointer"
+                          (gameState.players.length >= 2)
+                            ? (gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady)
+                              ? "bg-emerald-500 text-white hover:scale-[1.03] shadow-emerald-500/30 active:scale-95 cursor-pointer"
+                              : "bg-amber-500 text-black hover:scale-[1.03] shadow-amber-500/30 active:scale-95 cursor-pointer")
                             : "bg-zinc-800 text-zinc-600 cursor-not-allowed border border-white/5 opacity-50"
                         )}
                       >
-                        <Play size={18} fill="currentColor" /> 开始游戏
+                        {gameState.players.length >= 2 && !gameState.players.every((p, i) => i === 0 || p.id.startsWith('ai-') || p.isReady) ? (
+                          <>
+                            <Zap size={18} fill="currentColor" /> 提醒准备
+                          </>
+                        ) : (
+                          <>
+                            <Play size={18} fill="currentColor" /> 开始游戏
+                          </>
+                        )}
                       </button>
                     )}
                     <button
@@ -1162,17 +1227,22 @@ export default function App() {
             transition={{ duration: 0.4, ease: "easeInOut" }}
             className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 text-white relative"
           >
-            {/* Player Left Overlay */}
+            {/* Host Change & Player Left Overlays */}
             <AnimatePresence>
-              {gameState.playerLeftMessage && (
+              {(gameState.playerLeftMessage || gameState.hostChangeMessage) && (
                 <motion.div
                   initial={{ opacity: 0, y: -50 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -50 }}
-                  className="absolute top-20 left-1/2 -translate-x-1/2 z-[2000] bg-orange-500 text-white px-8 py-4 rounded-full shadow-[0_20px_40px_rgba(249,115,22,0.5)] border-4 border-white flex items-center gap-3"
+                  className={cn(
+                    "absolute top-20 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-full shadow-2xl border-4 border-white flex items-center gap-3",
+                    gameState.hostChangeMessage ? "bg-emerald-500 shadow-emerald-500/50" : "bg-orange-500 shadow-orange-500/50"
+                  )}
                 >
-                  <LogOut size={24} />
-                  <span className="text-xl font-black tracking-widest">{gameState.playerLeftMessage}</span>
+                  {gameState.hostChangeMessage ? <Trophy size={24} /> : <LogOut size={24} />}
+                  <span className="text-xl font-black tracking-widest">
+                    {gameState.hostChangeMessage || gameState.playerLeftMessage}
+                  </span>
                 </motion.div>
               )}
             </AnimatePresence>
