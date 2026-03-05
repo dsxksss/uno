@@ -203,9 +203,36 @@ func startPeriodicRoomListBroadcast() {
 			roomList := make([]map[string]interface{}, 0, len(rooms))
 			for _, room := range rooms {
 				room.Mutex.Lock()
+				
+				// 获胜后或没有玩家时不显示在房间列表
+				if room.State.Status == Ended || len(room.State.Players) == 0 {
+					room.Mutex.Unlock()
+					continue
+				}
+
+				// 检查是否有真人在内
+				hasHuman := false
+				for _, p := range room.State.Players {
+					if p.IsLocal {
+						hasHuman = true
+						break
+					}
+				}
+				if !hasHuman {
+					room.Mutex.Unlock()
+					continue
+				}
+
+				hostName := "未知"
+				if len(room.State.Players) > 0 {
+					hostName = room.State.Players[0].Name
+				}
+				
 				roomList = append(roomList, map[string]interface{}{
 					"code":        room.Code,
 					"playerCount": len(room.State.Players),
+					"hostName":    hostName,
+					"status":      room.State.Status,
 				})
 				room.Mutex.Unlock()
 			}
