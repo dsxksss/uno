@@ -9,3 +9,5 @@ coverage/
 
 *.exe
 backend/unoserver
+
+bevy_client/target
