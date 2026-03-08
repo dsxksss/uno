@@ -1,13 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
-)
 
-const INITIAL_HAND_SIZE = 7
+	"github.com/google/uuid"
+)
 
 func (r *Room) StartGame() {
 	if len(r.State.Players) < 2 {
@@ -15,62 +14,44 @@ func (r *Room) StartGame() {
 	}
 
 	fullDeck := CreateDeck()
-	players := make([]Player, len(r.State.Players))
-	for i, p := range r.State.Players {
-		players[i] = Player{
-			ID:            p.ID,
-			Name:          p.Name,
-			Hand:          []CardData{},
-			IsLocal:       p.IsLocal,
-			HasShoutedUno: false,
-			Difficulty:    p.Difficulty,
-		}
-	}
-
-	for i := 0; i < INITIAL_HAND_SIZE; i++ {
-		for j := range players {
+	
+	// Setup players
+	for i := range r.State.Players {
+		p := &r.State.Players[i]
+		p.Employees = CreateEmployees()
+		p.Hand = []SkillCard{}
+		p.MaxMana = 1
+		p.Mana = 1
+		
+		// Add their ultimate card
+		p.Hand = append(p.Hand, CreateUltimateCard(p.Department))
+		
+		// Draw initial 4 cards
+		for j := 0; j < 4; j++ {
 			if len(fullDeck) == 0 {
-				fullDeck = CreateDeck()
+				break
 			}
 			card := fullDeck[len(fullDeck)-1]
 			fullDeck = fullDeck[:len(fullDeck)-1]
-			players[j].Hand = append(players[j].Hand, card)
+			p.Hand = append(p.Hand, card)
 		}
 	}
 
-	firstCardIndex := -1
-	for i, card := range fullDeck {
-		if IsNumberCard(card) {
-			firstCardIndex = i
-			break
-		}
+	r.InternalState = InternalState{
+		Deck:        fullDeck,
+		DiscardPile: []SkillCard{},
 	}
 
-	if firstCardIndex == -1 {
-		firstCardIndex = 0
-	}
+	r.State.CurrentPlayerIndex = 0
+	r.State.Status = StatusPlaying
+	r.State.TurnNumber = 1
+	r.State.DeckCount = len(r.InternalState.Deck)
+	r.State.DiscardCount = 0
+	r.State.TimeLeft = 60
+	r.State.EventMessage = "游戏开始！"
 
-	firstCard := fullDeck[firstCardIndex]
-	fullDeck = append(fullDeck[:firstCardIndex], fullDeck[firstCardIndex+1:]...)
-
-	r.State = GameState{
-		Deck:               fullDeck,
-		DiscardPile:        []CardData{firstCard},
-		Players:            players,
-		CurrentPlayerIndex: 0,
-		Direction:          1,
-		Status:             Playing,
-		RoomCode:           r.Code,
-		TimeLeft:           30,
-		DrawStack:          0,
-		CurrentWildColor:   "",
-		IsDevMode:          r.State.IsDevMode,
-		Spectators:         r.State.Spectators,
-		PlayAgainVotes:     make(map[string]bool),
-	}
-
+	// Start turn timer
 	go r.StartTimer()
-	r.CheckAI()
 }
 
 func (r *Room) StartTimer() {
@@ -80,80 +61,106 @@ func (r *Room) StartTimer() {
 	for {
 		<-ticker.C
 		r.Mutex.Lock()
-		if r.State.Status != Playing {
+		if r.State.Status != StatusPlaying {
 			r.Mutex.Unlock()
 			return
 		}
 		
-		if r.State.IsReverseActive || r.State.JumpInPlayerID != "" {
-			r.Mutex.Unlock()
-			continue
-		}
-
 		r.State.TimeLeft--
 		if r.State.TimeLeft <= 0 {
-			r.AutoMove()
+			r.EndTurn(r.State.Players[r.State.CurrentPlayerIndex].ID)
 		}
 		r.updateStateLocked()
 		r.Mutex.Unlock()
 	}
 }
 
-func (r *Room) AutoMove() {
-	if r.State.Status != Playing {
+func (r *Room) EndTurn(playerID string) {
+	if r.State.Status != StatusPlaying {
+		return
+	}
+	currentPlayer := &r.State.Players[r.State.CurrentPlayerIndex]
+	if currentPlayer.ID != playerID {
 		return
 	}
 
-	// If someone needs to pick a color, pick one for them
-	if r.State.PendingWildColorPlayerIndex != nil {
-		pIdx := *r.State.PendingWildColorPlayerIndex
-		if pIdx >= 0 && pIdx < len(r.State.Players) {
-			colors := []CardColor{Red, Blue, Green, Yellow}
-			randomColor := colors[rand.Intn(len(colors))]
-			r.ChooseColor(r.State.Players[pIdx].ID, randomColor)
-			return
-		}
-	}
-
-	player := &r.State.Players[r.State.CurrentPlayerIndex]
-	topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
-	lastNum := GetLastNumberValue(r.State.DiscardPile)
+	// Move to next player
+	r.State.CurrentPlayerIndex = (r.State.CurrentPlayerIndex + 1) % len(r.State.Players)
+	nextPlayer := &r.State.Players[r.State.CurrentPlayerIndex]
 	
-	var playableCardID string
-	for _, card := range player.Hand {
-		if CanPlayCard(card, topCard, r.State.DrawStack, r.State.CurrentWildColor, lastNum) {
-			playableCardID = card.ID
-			break
-		}
+	if r.State.CurrentPlayerIndex == 0 {
+		r.State.TurnNumber++
 	}
 
-	if playableCardID != "" {
-		r.PlayCardInternal(player.ID, playableCardID)
-	} else {
-		r.DrawCard(player.ID)
+	// Apply start-of-turn buffs/debuffs for nextPlayer
+	
+	// 1. Max Mana calculation
+	nextPlayer.MaxMana += 1
+	if nextPlayer.MaxMana > 10 {
+		nextPlayer.MaxMana = 10
 	}
+	
+	actualMaxMana := nextPlayer.MaxMana - nextPlayer.ManaDebuff
+	if actualMaxMana < 1 {
+		actualMaxMana = 1
+	}
+	nextPlayer.ManaDebuff = 0 // clear
+	
+	// 2. Refill mana
+	nextPlayer.Mana = actualMaxMana
+	
+	// 3. Clear other debuffs
+	nextPlayer.CostFloor = 0
+	nextPlayer.ShieldActive = false
+	
+	// 4. Draw card
+	drawCount := 1 - nextPlayer.DrawDebuff
+	if drawCount < 0 { drawCount = 0 }
+	nextPlayer.DrawDebuff = 0 // clear
+
+	for i := 0; i < drawCount; i++ {
+		r.drawCardForPlayer(nextPlayer)
+	}
+
+	r.State.TimeLeft = 60
+	r.State.EventMessage = fmt.Sprintf("现在是 %s 的回合", nextPlayer.Name)
 }
 
-func (r *Room) PlayCard(playerID string, cardID string) {
-	r.PlayCardInternal(playerID, cardID)
-}
-
-func (r *Room) PlayCardInternal(playerID string, cardID string) {
-	playerIndex := -1
-	for i, p := range r.State.Players {
-		if p.ID == playerID {
-			playerIndex = i
-			break
+func (r *Room) drawCardForPlayer(player *Player) {
+	if len(r.InternalState.Deck) == 0 {
+		// Reshuffle discard into deck if possible
+		if len(r.InternalState.DiscardPile) > 0 {
+			r.InternalState.Deck = Shuffle(r.InternalState.DiscardPile)
+			r.InternalState.DiscardPile = []SkillCard{}
+			r.State.EventMessage = "弃牌堆洗入牌库"
+		} else {
+			return // literally no cards left
 		}
 	}
+	
+	card := r.InternalState.Deck[len(r.InternalState.Deck)-1]
+	r.InternalState.Deck = r.InternalState.Deck[:len(r.InternalState.Deck)-1]
+	player.Hand = append(player.Hand, card)
+	
+	r.State.DeckCount = len(r.InternalState.Deck)
+	r.State.DiscardCount = len(r.InternalState.DiscardPile)
+}
 
-	if playerIndex == -1 {
+func (r *Room) PlayCard(playerID string, cardID string, targetEmployeeID string) {
+	if r.State.Status != StatusPlaying {
 		return
 	}
 
-	player := &r.State.Players[playerIndex]
+	playerIndex := r.State.CurrentPlayerIndex
+	currentPlayer := &r.State.Players[playerIndex]
+	
+	if currentPlayer.ID != playerID {
+		return
+	}
+
+	// Find card in hand
 	cardIndex := -1
-	for i, c := range player.Hand {
+	for i, c := range currentPlayer.Hand {
 		if c.ID == cardID {
 			cardIndex = i
 			break
@@ -164,254 +171,186 @@ func (r *Room) PlayCardInternal(playerID string, cardID string) {
 		return
 	}
 
-	card := player.Hand[cardIndex]
-	topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
-	lastNum := GetLastNumberValue(r.State.DiscardPile)
+	card := currentPlayer.Hand[cardIndex]
 
-	isJumpIn := playerIndex != r.State.CurrentPlayerIndex
-
-	if isJumpIn {
-		if !CanJumpIn(card, topCard) {
-			return
-		}
-	} else {
-		if !CanPlayCard(card, topCard, r.State.DrawStack, r.State.CurrentWildColor, lastNum) {
+	// Check Mana
+	if currentPlayer.Mana < card.Cost {
+		r.State.EventMessage = "法力不足"
+		return
+	}
+	
+	// Check CostFloor Debuff
+	if card.Cost <= currentPlayer.CostFloor && card.Cost > 0 { // allow 0 cost cards? rules say "can't play 3 or less"? Wait, rule: "无法打出3费以上的牌" -> Cost Ceiling!
+		// Let's implement CostCeiling (if CostFloor logic was inverted)
+		// Oh, the implementation plan said: "无法打出3费以上的牌" -> cannot play cards with Cost > 3
+		if card.Cost > currentPlayer.CostFloor && currentPlayer.CostFloor > 0 {
+			r.State.EventMessage = "受预算削减影响，无法打出高费卡"
 			return
 		}
 	}
 
-	// Rule: Cannot win with an action card
-	if len(player.Hand) == 1 && !IsNumberCard(card) {
+	// Pay costs
+	currentPlayer.Mana -= card.Cost
+	currentPlayer.Hand = append(currentPlayer.Hand[:cardIndex], currentPlayer.Hand[cardIndex+1:]...)
+
+	// Execute Effect
+	r.resolveCardEffect(currentPlayer, playerIndex, card, targetEmployeeID)
+
+	// Discard
+	r.InternalState.DiscardPile = append(r.InternalState.DiscardPile, card)
+	r.State.DiscardCount = len(r.InternalState.DiscardPile)
+	
+	r.State.LastAction = fmt.Sprintf("%s 打出了 [%s]", currentPlayer.Name, card.Name)
+
+	r.CheckWinCondition()
+}
+
+func (r *Room) resolveCardEffect(player *Player, playerIndex int, card SkillCard, targetEmpID string) {
+	opponentIndex := (playerIndex + 1) % len(r.State.Players)
+	opponent := &r.State.Players[opponentIndex]
+	
+	// Interference Shield Check
+	if card.CardType == CardTypeInterfere && opponent.ShieldActive {
+		opponent.ShieldActive = false
+		r.State.EventMessage = fmt.Sprintf("%s 的居家办公抵消了干扰！", opponent.Name)
 		return
 	}
 
-	player.Hand = append(player.Hand[:cardIndex], player.Hand[cardIndex+1:]...)
-	player.HasShoutedUno = false
-	r.State.DiscardPile = append(r.State.DiscardPile, card)
-
-	nextDirection := r.State.Direction
-	skipNext := false
-	newDrawStack := r.State.DrawStack
-
-	if card.Value == Reverse {
-		nextDirection = r.State.Direction * -1
-		if len(r.State.Players) == 2 && newDrawStack == 0 {
-			skipNext = true
+	switch card.Effect {
+	// === Optimize ===
+	case "performance_review": // 2 dmg to 1 emp
+		r.damageEmployee(player, targetEmpID, 2)
+	case "pip_review": // 3 dmg to 1 emp
+		r.damageEmployee(player, targetEmpID, 3)
+	case "bottom_eliminate": // remove lowest HP emp
+		if len(player.Employees) > 0 {
+			lowestIdx := 0
+			for i := 1; i < len(player.Employees); i++ {
+				if player.Employees[i].HP < player.Employees[lowestIdx].HP {
+					lowestIdx = i
+				}
+			}
+			r.damageEmployee(player, player.Employees[lowestIdx].ID, 99)
 		}
-	} else if card.Value == Skip {
-		if len(r.State.Players) == 2 && newDrawStack > 0 {
-			skipNext = false
+	case "pointless_overtime": // 1 dmg to all own
+		for i := len(player.Employees) - 1; i >= 0; i-- {
+			r.damageEmployee(player, player.Employees[i].ID, 1)
+		}
+
+	// === Interfere ===
+	case "cross_dept_meeting": // opponent max mana -2 next turn
+		opponent.ManaDebuff += 2
+	case "urgent_request": // add P1 to opponent
+		opponent.Employees = append(opponent.Employees, Employee{
+			ID:    fmt.Sprintf("emp-%s", uuid.New().String()[:8]),
+			Level: 1,
+			Name:  "突发需求(P1)",
+			HP:    1,
+			MaxHP: 1,
+		})
+	case "dingtalk_bomb": // opponent draw -1
+		opponent.DrawDebuff += 1
+
+	// === Buff ===
+	case "coffee_boost": // draw 2
+		r.drawCardForPlayer(player)
+		r.drawCardForPlayer(player)
+	case "flex_work": // current mana +2
+		player.Mana += 2
+
+	// === Defense/Special ===
+	case "work_from_home": // shield
+		player.ShieldActive = true
+	case "transfer_employee": // move 1 emp to opponent
+		if len(player.Employees) > 0 {
+			targetIdx := -1
+			for i, emp := range player.Employees {
+				if emp.ID == targetEmpID {
+					targetIdx = i
+					break
+				}
+			}
+			if targetIdx == -1 { targetIdx = 0 } // fallback
+			
+			emp := player.Employees[targetIdx]
+			player.Employees = append(player.Employees[:targetIdx], player.Employees[targetIdx+1:]...)
+			opponent.Employees = append(opponent.Employees, emp)
+		}
+	case "slacking": // random 50/50
+		if rand.Float32() < 0.5 {
+			r.drawCardForPlayer(player)
+			r.drawCardForPlayer(player)
+			r.drawCardForPlayer(player)
+			r.State.EventMessage = "摸鱼成功：抽3张牌"
 		} else {
-			skipNext = true
-		}
-	} else if card.Value == Draw2 {
-		newDrawStack += 2
-	} else if card.Value == Draw4 {
-		newDrawStack += 4
-	}
-
-	if len(player.Hand) == 0 {
-		r.State.Winner = player.Name
-		r.State.Status = Ended
-		return
-	}
-
-	nextPlayerIndex := (playerIndex + nextDirection + len(r.State.Players)) % len(r.State.Players)
-	if skipNext {
-		nextPlayerIndex = (nextPlayerIndex + nextDirection + len(r.State.Players)) % len(r.State.Players)
-	}
-
-	r.State.Direction = nextDirection
-	r.State.DrawStack = newDrawStack
-	r.State.IsReverseActive = card.Value == Reverse
-
-	if r.State.IsReverseActive {
-		time.AfterFunc(1500*time.Millisecond, func() {
-			r.Mutex.Lock()
-			r.State.IsReverseActive = false
-			r.Mutex.Unlock()
-			r.UpdateState()
-			r.CheckAI()
-		})
-	}
-	if isJumpIn {
-		r.State.JumpInPlayerID = player.ID
-		time.AfterFunc(2*time.Second, func() {
-			r.Mutex.Lock()
-			r.State.JumpInPlayerID = ""
-			r.Mutex.Unlock()
-			r.UpdateState()
-			r.CheckAI()
-		})
-	}
-
-	if card.Color == Wild || card.Value == Draw4 {
-		r.State.PendingWildColorPlayerIndex = &playerIndex
-		r.State.CurrentPlayerIndex = playerIndex
-		r.State.TimeLeft = 30
-	} else {
-		r.State.CurrentPlayerIndex = nextPlayerIndex
-		r.State.TimeLeft = 30
-		r.State.CurrentWildColor = ""
-		r.State.PendingWildColorPlayerIndex = nil
-	}
-
-	if len(player.Hand) == 1 {
-		r.State.PendingUnoPlayerID = player.ID
-		time.AfterFunc(3*time.Second, func() {
-			r.Mutex.Lock()
-			if r.State.PendingUnoPlayerID == player.ID {
-				// Penalty logic
-				r.DrawPenalty(player.ID, 2)
-				r.State.PendingUnoPlayerID = ""
+			if len(player.Hand) > 0 {
+				discardIdx := rand.Intn(len(player.Hand))
+				r.InternalState.DiscardPile = append(r.InternalState.DiscardPile, player.Hand[discardIdx])
+				player.Hand = append(player.Hand[:discardIdx], player.Hand[discardIdx+1:]...)
 			}
-			r.Mutex.Unlock()
-			r.UpdateState()
-			r.CheckAI()
-		})
-	}
+			r.State.EventMessage = "摸鱼被抓：随机弃1张牌"
+		}
 
-	r.CheckAI()
+	// === Global ===
+	case "nine_nine_six": // 1 dmg to all
+		for _, p := range []*Player{player, opponent} {
+			for i := len(p.Employees) - 1; i >= 0; i-- {
+				r.damageEmployee(p, p.Employees[i].ID, 1)
+			}
+		}
+
+	// === Ultimates ===
+	case "system_refactor": // Dev: remove all P1-P2
+		for i := len(player.Employees) - 1; i >= 0; i-- {
+			if player.Employees[i].Level <= 2 {
+				player.Employees = append(player.Employees[:i], player.Employees[i+1:]...)
+			}
+		}
+	case "mega_deal": // Biz: remove 2 random
+		for i := 0; i < 2; i++ {
+			if len(player.Employees) > 0 {
+				idx := rand.Intn(len(player.Employees))
+				player.Employees = append(player.Employees[:idx], player.Employees[idx+1:]...)
+			}
+		}
+	case "budget_cut": // Admin: opponent can't play >3 cost
+		opponent.CostFloor = 3 // Use CostFloor variable as a ceiling limiter
+	case "org_restructure": // Mgmt: swap 1 random
+		if len(player.Employees) > 0 && len(opponent.Employees) > 0 {
+			idx1 := rand.Intn(len(player.Employees))
+			idx2 := rand.Intn(len(opponent.Employees))
+			
+			emp1 := player.Employees[idx1]
+			emp2 := opponent.Employees[idx2]
+			
+			player.Employees[idx1] = emp2
+			opponent.Employees[idx2] = emp1
+		}
+	}
 }
 
-func (r *Room) DrawCard(playerID string) {
-	playerIndex := -1
-	for i, p := range r.State.Players {
-		if p.ID == playerID {
-			playerIndex = i
+func (r *Room) damageEmployee(player *Player, empID string, amount int) {
+	for i, emp := range player.Employees {
+		if emp.ID == empID || empID == "" { // "" hits first available if fallback needed
+			player.Employees[i].HP -= amount
+			if player.Employees[i].HP <= 0 {
+				// Target optimized
+				player.Employees = append(player.Employees[:i], player.Employees[i+1:]...)
+			}
 			break
 		}
 	}
-
-	if playerIndex != r.State.CurrentPlayerIndex || r.State.PendingWildColorPlayerIndex != nil {
-		return
-	}
-
-	drawCount := r.State.DrawStack
-	if drawCount == 0 {
-		drawCount = 1
-	}
-
-	r.DrawPenalty(playerID, drawCount)
-
-	r.State.DrawStack = 0
-	r.State.CurrentPlayerIndex = (r.State.CurrentPlayerIndex + r.State.Direction + len(r.State.Players)) % len(r.State.Players)
-	r.State.TimeLeft = 30
-	r.CheckAI()
 }
 
-func (r *Room) DrawPenalty(playerID string, count int) {
-	playerIndex := -1
-	for i, p := range r.State.Players {
-		if p.ID == playerID {
-			playerIndex = i
-			break
-		}
-	}
-	if playerIndex == -1 { return }
-	player := &r.State.Players[playerIndex]
-
-	for i := 0; i < count; i++ {
-		if len(r.State.Deck) == 0 {
-			if len(r.State.DiscardPile) <= 1 {
-				break
-			}
-			topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
-			remaining := r.State.DiscardPile[:len(r.State.DiscardPile)-1]
-			r.State.Deck = Shuffle(remaining)
-			r.State.DiscardPile = []CardData{topCard}
-		}
-
-		card := r.State.Deck[len(r.State.Deck)-1]
-		r.State.Deck = r.State.Deck[:len(r.State.Deck)-1]
-		player.Hand = append(player.Hand, card)
-	}
-}
-
-func (r *Room) ShoutUno(playerID string) {
-	if r.State.PendingUnoPlayerID == playerID {
-		r.State.PendingUnoPlayerID = ""
-		for i, p := range r.State.Players {
-			if p.ID == playerID {
-				r.State.Players[i].HasShoutedUno = true
-				time.AfterFunc(2*time.Second, func() {
-					r.Mutex.Lock()
-					r.State.Players[i].HasShoutedUno = false
-					r.Mutex.Unlock()
-					r.UpdateState()
-				})
-				break
-			}
-		}
-	}
-	r.CheckAI()
-}
-
-func (r *Room) ChooseColor(playerID string, color CardColor) {
-	if r.State.PendingWildColorPlayerIndex == nil {
-		return
-	}
-
-	playerIndex := *r.State.PendingWildColorPlayerIndex
-	if r.State.Players[playerIndex].ID != playerID {
-		return
-	}
-
-	r.State.CurrentWildColor = color
-	r.State.PendingWildColorPlayerIndex = nil
-
-	topCard := &r.State.DiscardPile[len(r.State.DiscardPile)-1]
-	topCard.ChosenColor = color
-
-	// Advance turn now after color is chosen
-	nextPlayerIndex := (r.State.CurrentPlayerIndex + r.State.Direction + len(r.State.Players)) % len(r.State.Players)
-	r.State.CurrentPlayerIndex = nextPlayerIndex
-	r.State.TimeLeft = 30
-	r.CheckAI()
-}
-
-func (r *Room) UpdateAISettings(playerID string, aiCount int, difficulty Difficulty) {
-	// Only first player (host) can change settings
-	if len(r.State.Players) == 0 || r.State.Players[0].ID != playerID {
-		return
-	}
-
-	if r.State.Status != Lobby {
-		return
-	}
-
-	// Filter current players to keep only humans
-	humans := []Player{}
+func (r *Room) CheckWinCondition() {
 	for _, p := range r.State.Players {
-		// Keep all real human players (they have IsLocal set to true in main.go)
-		if p.IsLocal {
-			humans = append(humans, p)
+		if len(p.Employees) == 0 {
+			r.State.Winner = p.Name
+			r.State.Status = StatusEnded
+			r.State.EventMessage = fmt.Sprintf("%s 成功完成了所有KPI，顺利毕业！", p.Name)
+			return
 		}
 	}
-
-	// Limit aiCount so that total players <= 10
-	maxAI := 10 - len(humans)
-	if aiCount > maxAI {
-		aiCount = maxAI
-	}
-	if aiCount < 0 {
-		aiCount = 0
-	}
-
-	newPlayers := make([]Player, len(humans))
-	copy(newPlayers, humans)
-
-	for i := 0; i < aiCount; i++ {
-		newPlayers = append(newPlayers, Player{
-			ID:            fmt.Sprintf("ai-%d", i),
-			Name:          fmt.Sprintf("机器人 %d", i+1),
-			Hand:          []CardData{},
-			IsLocal:       false,
-			HasShoutedUno: false,
-			Difficulty:    difficulty,
-		})
-	}
-	r.State.Players = newPlayers
 }
 
 func (r *Room) RemovePlayer(playerID string) {
@@ -423,453 +362,14 @@ func (r *Room) RemovePlayer(playerID string) {
 		}
 	}
 
-	found := false
-	var leftPlayerName string
-	var leftPlayerHand []CardData
-
 	if playerIndex != -1 {
-		found = true
-		leftPlayerName = r.State.Players[playerIndex].Name
-		leftPlayerHand = r.State.Players[playerIndex].Hand
-
-		// Remove from slice
+		leftPlayerName := r.State.Players[playerIndex].Name
 		r.State.Players = append(r.State.Players[:playerIndex], r.State.Players[playerIndex+1:]...)
 
-		if r.State.Status == Playing {
-			if len(r.State.Players) <= 1 {
-				if len(r.State.Players) == 1 {
-					r.State.Winner = r.State.Players[0].Name
-				}
-				r.State.Status = Ended
-				return
-			}
-
-			// Adjust CurrentPlayerIndex
-			if playerIndex < r.State.CurrentPlayerIndex {
-				r.State.CurrentPlayerIndex--
-			} else if r.State.CurrentPlayerIndex >= len(r.State.Players) {
-				r.State.CurrentPlayerIndex = 0
-			}
-
-			// Handle PendingWildColorPlayerIndex
-			if r.State.PendingWildColorPlayerIndex != nil {
-				pendingIdx := *r.State.PendingWildColorPlayerIndex
-				if playerIndex == pendingIdx {
-					// The person choosing color left. Clear it and move to next player.
-					r.State.PendingWildColorPlayerIndex = nil
-					r.State.TimeLeft = 30
-					// CurrentPlayerIndex is already at 'pendingIdx' (since we were waiting for them)
-					// No further adjustment needed, CheckAI will take over for the person now at this index.
-				} else if playerIndex < pendingIdx {
-					newPendingIdx := pendingIdx - 1
-					r.State.PendingWildColorPlayerIndex = &newPendingIdx
-				}
-			}
-
-			// Reshuffle the leaving player's cards into the deck
-			if len(leftPlayerHand) > 0 {
-				r.State.Deck = append(r.State.Deck, leftPlayerHand...)
-				r.State.Deck = Shuffle(r.State.Deck)
-			}
-
-			// Show notification
-			r.State.PlayerLeftMessage = fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName)
-			messageID := fmt.Sprintf("left-%d", time.Now().UnixNano())
-			r.State.PendingUnoPlayerID = messageID // Reuse this field or similar for temporary message? No, better just timeout.
-			
-			// We already have the notification timer below
-			time.AfterFunc(3*time.Second, func() {
-				r.Mutex.Lock()
-				// Only clear if no one else left meanwhile (best effort)
-				if r.State.PlayerLeftMessage == fmt.Sprintf("玩家 %s 退出游戏，手牌已洗入牌库", leftPlayerName) {
-					r.State.PlayerLeftMessage = ""
-				}
-				r.Mutex.Unlock()
-				r.UpdateState()
-			})
+		if r.State.Status == StatusPlaying {
+			r.State.Winner = "对手" // if one leaves, the other wins
+			r.State.EventMessage = fmt.Sprintf("玩家 %s 退出游戏，对手不战而胜！", leftPlayerName)
+			r.State.Status = StatusEnded
 		}
-	}
-
-	// Also check spectators
-	newSpectators := []Player{}
-	for _, p := range r.State.Spectators {
-		if p.ID == playerID {
-			found = true
-			continue
-		}
-		newSpectators = append(newSpectators, p)
-	}
-	r.State.Spectators = newSpectators
-
-	if !found {
-		return
-	}
-
-	// Ensure Host priority: If players[0] is AI but there are humans, swap
-	hostChanged := false
-	var newHostName string
-
-	if len(r.State.Players) > 0 && !startsWith(r.State.Players[0].ID, "ai-") {
-		// Already a human host
-	} else if len(r.State.Players) > 1 {
-		for i := 1; i < len(r.State.Players); i++ {
-			if startsWith(r.State.Players[i].ID, "ai-") {
-				continue
-			}
-			// Found a human, swap to host
-			r.State.Players[0], r.State.Players[i] = r.State.Players[i], r.State.Players[0]
-			hostChanged = true
-			newHostName = r.State.Players[0].Name
-			
-			// If playing, we must also adjust CurrentPlayerIndex to follow the player!
-			if r.State.Status == Playing {
-				if r.State.CurrentPlayerIndex == 0 {
-					r.State.CurrentPlayerIndex = i
-				} else if r.State.CurrentPlayerIndex == i {
-					r.State.CurrentPlayerIndex = 0
-				}
-				// Also adjust pendingWildColorPlayerIndex if it was these players
-				if r.State.PendingWildColorPlayerIndex != nil {
-					idx := *r.State.PendingWildColorPlayerIndex
-					if idx == 0 {
-						newIdx := i
-						r.State.PendingWildColorPlayerIndex = &newIdx
-					} else if idx == i {
-						newIdx := 0
-						r.State.PendingWildColorPlayerIndex = &newIdx
-					}
-				}
-			}
-			break
-		}
-	}
-
-	if hostChanged {
-		r.State.HostChangeMessage = fmt.Sprintf("房主已离开，%s 成为新任房主", newHostName)
-		time.AfterFunc(3*time.Second, func() {
-			r.Mutex.Lock()
-			r.State.HostChangeMessage = ""
-			r.Mutex.Unlock()
-			r.UpdateState()
-		})
-	}
-
-	// Trigger AI if it's their turn now
-	if r.State.Status == Playing {
-		r.CheckAI()
 	}
 }
-
-func (r *Room) TransferHost(currentHostID string, targetPlayerID string) {
-	if len(r.State.Players) == 0 || r.State.Players[0].ID != currentHostID {
-		return
-	}
-
-	if currentHostID == targetPlayerID {
-		return
-	}
-
-	targetIndex := -1
-	for i, p := range r.State.Players {
-		if p.ID == targetPlayerID {
-			targetIndex = i
-			break
-		}
-	}
-
-	if targetIndex == -1 || startsWith(targetPlayerID, "ai-") {
-		return
-	}
-
-	// Swap indices to make target the host (index 0)
-	r.State.Players[0], r.State.Players[targetIndex] = r.State.Players[targetIndex], r.State.Players[0]
-	
-	// Adjust CurrentPlayerIndex if playing
-	if r.State.Status == Playing {
-		if r.State.CurrentPlayerIndex == 0 {
-			r.State.CurrentPlayerIndex = targetIndex
-		} else if r.State.CurrentPlayerIndex == targetIndex {
-			r.State.CurrentPlayerIndex = 0
-		}
-	}
-
-	r.State.HostChangeMessage = fmt.Sprintf("房主已将权限转让给 %s", r.State.Players[0].Name)
-	time.AfterFunc(3*time.Second, func() {
-		r.Mutex.Lock()
-		r.State.HostChangeMessage = ""
-		r.Mutex.Unlock()
-		r.UpdateState()
-	})
-}
-
-func (r *Room) VotePlayAgain(playerID string) {
-	if r.State.Status != Ended {
-		return
-	}
-	if r.State.PlayAgainVotes == nil {
-		r.State.PlayAgainVotes = make(map[string]bool)
-	}
-	r.State.PlayAgainVotes[playerID] = true
-
-	// Check if all human players have voted
-	allHumanVoted := true
-	humanCount := 0
-	for _, p := range r.State.Players {
-		if !startsWith(p.ID, "ai-") {
-			humanCount++
-			if !r.State.PlayAgainVotes[p.ID] {
-				allHumanVoted = false
-				break
-			}
-		}
-	}
-
-	if humanCount > 0 && allHumanVoted {
-		r.StartGame()
-	}
-}
-
-func (r *Room) KickPlayer(currentHostID string, targetPlayerID string) {
-	if len(r.State.Players) == 0 || r.State.Players[0].ID != currentHostID {
-		return
-	}
-
-	if currentHostID == targetPlayerID {
-		return
-	}
-
-	// 1. First, tell the target they are kicked by broadcasting a specific message
-	// Or we can just set a special state field.
-	var targetName string
-	for _, p := range r.State.Players {
-		if p.ID == targetPlayerID {
-			targetName = p.Name
-			break
-		}
-	}
-	if targetName == "" {
-		for _, p := range r.State.Spectators {
-			if p.ID == targetPlayerID {
-				targetName = p.Name
-				break
-			}
-		}
-	}
-
-	if targetName == "" {
-		return
-	}
-
-	// Set kick message for everyone to see
-	r.State.KickMessage = fmt.Sprintf("房主已将 %s 移出房间", targetName)
-	
-	// Create a message specifically for the kicked person if needed, 
-	// but UpdateState will reach them before they are removed from Clients map.
-	
-	// 2. Perform Removal
-	r.RemovePlayer(targetPlayerID)
-	
-	// 3. Close their connection
-	if client, ok := r.Clients[targetPlayerID]; ok {
-		// Send a final state update so they see the kick message before closure
-		// We'll give it a tiny delay in the read/write pump usually, 
-		// but here we can just delete from map after update.
-		delete(r.Clients, targetPlayerID)
-		
-		// Optional: send explicit KICKED message
-		kickNotify, _ := json.Marshal(Message{Type: "KICKED"})
-		client.Send <- kickNotify
-	}
-
-	// Clear message after 3 seconds
-	time.AfterFunc(3*time.Second, func() {
-		r.Mutex.Lock()
-		r.State.KickMessage = ""
-		r.Mutex.Unlock()
-		r.UpdateState()
-	})
-}
-
-
-func (r *Room) CheckAI() {
-	if r.State.Status != Playing {
-		return
-	}
-
-	// 1. Handle Pending UNO Shout
-	if r.State.PendingUnoPlayerID != "" {
-		pIdx := -1
-		for i, p := range r.State.Players {
-			if p.ID == r.State.PendingUnoPlayerID { pIdx = i; break }
-		}
-		if pIdx != -1 && !startsWith(r.State.Players[pIdx].ID, "ai-") {
-			// Real player, we don't act for them
-		} else if pIdx != -1 {
-			// Bot needs to shout UNO
-			diff := r.State.Players[pIdx].Difficulty
-			if diff == "" { diff = Medium }
-			
-			delay := 1000 + rand.Intn(1000)
-			if diff == Easy { delay = 1500 + rand.Intn(1000) }
-			if diff == Hard { delay = 400 + rand.Intn(400) }
-			
-			pID := r.State.PendingUnoPlayerID
-			time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
-				r.Mutex.Lock()
-				defer r.Mutex.Unlock()
-				if r.State.PendingUnoPlayerID == pID {
-					// 80% chance to shout UNO
-					if rand.Float32() < 0.8 {
-						r.ShoutUno(pID)
-						r.updateStateLocked()
-					}
-				}
-			})
-			// Do not return! Let it continue to Choosing Color or Normal Turn
-		}
-	}
-
-	// 2. Handle Choosing Color
-	if r.State.PendingWildColorPlayerIndex != nil {
-		pIdx := *r.State.PendingWildColorPlayerIndex
-		if pIdx >= 0 && pIdx < len(r.State.Players) {
-			player := &r.State.Players[pIdx]
-			if !startsWith(player.ID, "ai-") { return }
-			
-			diff := player.Difficulty
-			if diff == "" { diff = Medium }
-			delay := 1000
-			if diff == Hard { delay = 500 }
-			
-			pID := player.ID
-			time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
-				r.Mutex.Lock()
-				defer r.Mutex.Unlock()
-				idx := r.State.PendingWildColorPlayerIndex
-				if idx != nil && *idx < len(r.State.Players) && r.State.Players[*idx].ID == pID {
-					colors := []CardColor{Red, Blue, Green, Yellow}
-					counts := make([]int, 4)
-					for _, c := range r.State.Players[*r.State.PendingWildColorPlayerIndex].Hand {
-						for i, col := range colors {
-							if c.Color == col { counts[i]++; break }
-						}
-					}
-					maxIdx := 0
-					for i, count := range counts {
-						if count > counts[maxIdx] { maxIdx = i }
-					}
-					r.ChooseColor(pID, colors[maxIdx])
-					r.updateStateLocked()
-				}
-			})
-			return
-		}
-	}
-
-	// 3. Normal Turn
-	if r.State.CurrentPlayerIndex < 0 || r.State.CurrentPlayerIndex >= len(r.State.Players) {
-		return
-	}
-	player := &r.State.Players[r.State.CurrentPlayerIndex]
-	if !startsWith(player.ID, "ai-") {
-		return
-	}
-
-	// Block AI if animation is playing
-	if r.State.IsReverseActive || r.State.JumpInPlayerID != "" {
-		return
-	}
-
-	diff := player.Difficulty
-	if diff == "" { diff = Medium }
-	
-	delay := 800
-	if diff == Easy { delay = 1500 + rand.Intn(1000) }
-	if diff == Medium { delay = 500 + rand.Intn(400) }
-	if diff == Hard { delay = 50 + rand.Intn(100) }
-
-	pID := player.ID
-	time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
-		r.Mutex.Lock()
-		defer r.Mutex.Unlock()
-		
-		if r.State.Status != Playing || r.State.CurrentPlayerIndex >= len(r.State.Players) || r.State.Players[r.State.CurrentPlayerIndex].ID != pID {
-			return
-		}
-		if r.State.IsReverseActive || r.State.JumpInPlayerID != "" || r.State.PendingWildColorPlayerIndex != nil {
-			// Reschedule? Actually CheckAI will be called when these finish
-			return
-		}
-
-		topCard := r.State.DiscardPile[len(r.State.DiscardPile)-1]
-		lastNum := GetLastNumberValue(r.State.DiscardPile)
-		
-		var playableCardID string
-		playableCards := []CardData{}
-		isLastCard := len(r.State.Players[r.State.CurrentPlayerIndex].Hand) == 1
-		for _, card := range r.State.Players[r.State.CurrentPlayerIndex].Hand {
-			if CanPlayCard(card, topCard, r.State.DrawStack, r.State.CurrentWildColor, lastNum) {
-				// Rule: Cannot win with an action card
-				if isLastCard && !IsNumberCard(card) {
-					continue
-				}
-				playableCards = append(playableCards, card)
-			}
-		}
-
-		if len(playableCards) > 0 {
-			if diff == Hard {
-				// Strat: punishment
-				hasNearWinner := false
-				for i, p := range r.State.Players {
-					if i != r.State.CurrentPlayerIndex && len(p.Hand) <= 2 {
-						hasNearWinner = true
-						break
-					}
-				}
-				
-				if hasNearWinner {
-					// Try to play action cards
-					for _, c := range playableCards {
-						if c.Value == Draw4 || c.Value == Draw2 || c.Value == Skip || c.Value == Reverse {
-							playableCardID = c.ID
-							break
-						}
-					}
-				}
-				
-				if playableCardID == "" {
-					// Priority: match most common color
-					colorCounts := map[CardColor]int{Red: 0, Blue: 0, Green: 0, Yellow: 0}
-					for _, c := range r.State.Players[r.State.CurrentPlayerIndex].Hand {
-						if c.Color != Wild { colorCounts[c.Color]++ }
-					}
-					var bestColor CardColor
-					maxC := -1
-					for col, count := range colorCounts {
-						if count > maxC { maxC = count; bestColor = col }
-					}
-					for _, c := range playableCards {
-						if c.Color == bestColor && c.Value != WildCard && c.Value != Draw4 {
-							playableCardID = c.ID
-							break
-						}
-					}
-				}
-			}
-			if playableCardID == "" {
-				playableCardID = playableCards[0].ID
-			}
-			r.PlayCardInternal(pID, playableCardID)
-		} else {
-			r.DrawCard(pID)
-		}
-		r.updateStateLocked()
-	})
-}
-
-
-func startsWith(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[0:len(prefix)] == prefix
-}
-

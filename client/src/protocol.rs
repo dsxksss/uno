@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-// === Wire Protocol (matches Go backend Message struct) ===
+// === Wire Protocol ===
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ServerMessage {
@@ -10,16 +10,31 @@ pub struct ServerMessage {
     pub payload: serde_json::Value,
 }
 
-// === Card Types ===
+// === Employee ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct CardData {
+pub struct Employee {
     pub id: String,
-    pub color: String,
-    pub value: String,
-    #[serde(default)]
-    pub chosen_color: Option<String>,
+    pub level: i32,
+    pub name: String,
+    pub hp: i32,
+    #[serde(rename = "maxHP")]
+    pub max_hp: i32,
+    pub shielded: bool,
+}
+
+// === Skill Card ===
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCard {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub cost: i32,
+    pub card_type: String,
+    pub effect: String,
 }
 
 // === Player ===
@@ -29,55 +44,45 @@ pub struct CardData {
 pub struct Player {
     pub id: String,
     pub name: String,
-    pub hand: Vec<CardData>,
+    pub department: String,
+    pub employees: Vec<Employee>,
+    pub hand: Vec<SkillCard>,
+    pub mana: i32,
+    pub max_mana: i32,
     #[serde(default)]
     pub is_local: bool,
-    #[serde(default, rename = "hasShoutedUNO")]
-    pub has_shouted_uno: bool,
-    #[serde(default)]
-    pub difficulty: Option<String>,
     #[serde(default)]
     pub is_ready: bool,
+
+    #[serde(default)]
+    pub mana_debuff: i32,
+    #[serde(default)]
+    pub draw_debuff: i32,
+    #[serde(default)]
+    pub cost_floor: i32,
+    #[serde(default)]
+    pub shield_active: bool,
 }
 
-// === Game State (matches Go backend GameState) ===
+// === Game State ===
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GameState {
-    pub deck: Vec<CardData>,
-    pub discard_pile: Vec<CardData>,
     pub players: Vec<Player>,
     pub current_player_index: i32,
-    pub direction: i32,
     pub status: String,
     pub room_code: String,
     #[serde(default)]
     pub winner: Option<String>,
-    #[serde(default)]
+    pub turn_number: i32,
+    pub deck_count: i32,
+    pub discard_count: i32,
     pub time_left: i32,
     #[serde(default)]
-    pub draw_stack: i32,
+    pub last_action: Option<String>,
     #[serde(default)]
-    pub current_wild_color: Option<String>,
-    #[serde(default)]
-    pub pending_wild_color_player_index: Option<i32>,
-    #[serde(default, rename = "pendingUNOPlayerId")]
-    pub pending_uno_player_id: Option<String>,
-    #[serde(default)]
-    pub jump_in_player_id: Option<String>,
-    #[serde(default)]
-    pub spectators: Vec<Player>,
-    #[serde(default)]
-    pub is_reverse_active: bool,
-    #[serde(default)]
-    pub is_dev_mode: bool,
-    #[serde(default)]
-    pub player_left_message: Option<String>,
-    #[serde(default)]
-    pub host_change_message: Option<String>,
-    #[serde(default)]
-    pub play_again_votes: Option<serde_json::Value>,
+    pub event_message: Option<String>,
 }
 
 // === State Payload Wrapper ===

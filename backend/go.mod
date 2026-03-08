@@ -1,4 +1,4 @@
-module uno-backend
+module kpi-backend
 
 go 1.25.2
 

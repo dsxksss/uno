@@ -1,88 +1,106 @@
 package main
 
-type CardColor string
+import "encoding/json"
+
+// === Department Types ===
+
+type Department string
 
 const (
-	Red    CardColor = "red"
-	Blue   CardColor = "blue"
-	Green  CardColor = "green"
-	Yellow CardColor = "yellow"
-	Wild   CardColor = "wild"
+	DeptDev      Department = "dev"      // 开发部
+	DeptBusiness Department = "business" // 业务部
+	DeptAdmin    Department = "admin"    // 行政部
+	DeptMgmt     Department = "mgmt"     // 管理部
 )
 
-type CardValue string
+// === Employee (打工人) ===
 
-const (
-	Zero    CardValue = "0"
-	One     CardValue = "1"
-	Two     CardValue = "2"
-	Three   CardValue = "3"
-	Four    CardValue = "4"
-	Five    CardValue = "5"
-	Six     CardValue = "6"
-	Seven   CardValue = "7"
-	Eight   CardValue = "8"
-	Nine    CardValue = "9"
-	Skip    CardValue = "skip"
-	Reverse CardValue = "reverse"
-	Draw2   CardValue = "draw2"
-	WildCard CardValue = "wild"
-	Draw4   CardValue = "draw4"
-)
-
-type CardData struct {
-	ID          string    `json:"id"`
-	Color       CardColor `json:"color"`
-	Value       CardValue `json:"value"`
-	ChosenColor CardColor `json:"chosenColor,omitempty"`
+type Employee struct {
+	ID       string `json:"id"`
+	Level    int    `json:"level"`    // P1=1, P2=2, P3=3, etc.
+	Name     string `json:"name"`     // Display name
+	HP       int    `json:"hp"`       // Current HP
+	MaxHP    int    `json:"maxHP"`    // Max HP
+	Shielded bool   `json:"shielded"` // Protected from interference
 }
 
-type Difficulty string
+// === Skill Card Types ===
+
+type SkillCardType string
 
 const (
-	Easy   Difficulty = "easy"
-	Medium Difficulty = "medium"
-	Hard   Difficulty = "hard"
+	CardTypeOptimize  SkillCardType = "optimize"  // 优化类：对自己员工造成伤害
+	CardTypeInterfere SkillCardType = "interfere" // 干扰类：妨碍对手
+	CardTypeBuff      SkillCardType = "buff"      // 增益类：抽牌/加费
+	CardTypeDefense   SkillCardType = "defense"   // 防御/特殊类
+	CardTypeGlobal    SkillCardType = "global"    // 全局事件
+	CardTypeUltimate  SkillCardType = "ultimate"  // 部门终结技
 )
+
+type SkillCard struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Cost        int           `json:"cost"`
+	CardType    SkillCardType `json:"cardType"`
+	Effect      string        `json:"effect"` // Effect identifier for logic dispatch
+}
+
+// === Player ===
 
 type Player struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	Hand           []CardData `json:"hand"`
-	IsLocal        bool       `json:"isLocal"`
-	HasShoutedUno  bool       `json:"hasShoutedUNO"`
-	Difficulty     Difficulty `json:"difficulty,omitempty"`
-	IsReady        bool       `json:"isReady"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Department Department `json:"department"`
+	Employees  []Employee `json:"employees"`
+	Hand       []SkillCard `json:"hand"`
+	Mana       int        `json:"mana"`
+	MaxMana    int        `json:"maxMana"`
+	IsLocal    bool       `json:"isLocal"`
+	IsReady    bool       `json:"isReady"`
+
+	// Debuffs / Status effects (cleared each turn)
+	ManaDebuff    int  `json:"manaDebuff"`    // Reduce max mana next turn
+	DrawDebuff    int  `json:"drawDebuff"`    // Reduce draw count next turn
+	CostFloor     int  `json:"costFloor"`     // Can't play cards <= this cost (预算削减)
+	ShieldActive  bool `json:"shieldActive"`  // 居家办公: block next interference
 }
+
+// === Game Status ===
 
 type GameStatus string
 
 const (
-	Lobby   GameStatus = "lobby"
-	Playing GameStatus = "playing"
-	Ended   GameStatus = "ended"
+	StatusLobby   GameStatus = "lobby"
+	StatusPlaying GameStatus = "playing"
+	StatusEnded   GameStatus = "ended"
 )
 
+// === Game State (synchronized to all clients) ===
+
 type GameState struct {
-	Deck                        []CardData `json:"deck"`
-	DiscardPile                 []CardData `json:"discardPile"`
-	Players                     []Player   `json:"players"`
-	CurrentPlayerIndex          int        `json:"currentPlayerIndex"`
-	Direction                   int        `json:"direction"` // 1 or -1
-	Status                      GameStatus `json:"status"`
-	RoomCode                    string     `json:"roomCode"`
-	Winner                      string     `json:"winner"`
-	TimeLeft                    int        `json:"timeLeft"`
-	DrawStack                   int        `json:"drawStack"`
-	CurrentWildColor            CardColor  `json:"currentWildColor"`
-	PendingWildColorPlayerIndex *int       `json:"pendingWildColorPlayerIndex"`
-	PendingUnoPlayerID          string     `json:"pendingUNOPlayerId"`
-	JumpInPlayerID              string     `json:"jumpInPlayerId"`
-	Spectators                  []Player   `json:"spectators"`
-	IsReverseActive             bool       `json:"isReverseActive"`
-	IsDevMode                   bool       `json:"isDevMode"`
-	PlayerLeftMessage           string     `json:"playerLeftMessage,omitempty"`
-	HostChangeMessage           string     `json:"hostChangeMessage,omitempty"`
-	KickMessage                 string          `json:"kickMessage,omitempty"`
-	PlayAgainVotes              map[string]bool `json:"playAgainVotes"`
+	Players            []Player    `json:"players"`
+	CurrentPlayerIndex int         `json:"currentPlayerIndex"`
+	Status             GameStatus  `json:"status"`
+	RoomCode           string      `json:"roomCode"`
+	Winner             string      `json:"winner,omitempty"`
+	TurnNumber         int         `json:"turnNumber"`
+	DeckCount          int         `json:"deckCount"`     // Don't send actual deck to clients
+	DiscardCount       int         `json:"discardCount"`
+	TimeLeft           int         `json:"timeLeft"`
+	LastAction         string      `json:"lastAction,omitempty"`    // Description of last action (for UI log)
+	EventMessage       string      `json:"eventMessage,omitempty"` // Temporary toast/event message
+}
+
+// Internal state (not sent to clients directly)
+type InternalState struct {
+	Deck        []SkillCard
+	DiscardPile []SkillCard
+}
+
+// === Message Protocol ===
+
+type Message struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
 }
