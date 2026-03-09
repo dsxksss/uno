@@ -1,9 +1,11 @@
+mod game;
 mod menu;
 mod particles;
 mod theme;
 mod transitions;
 
 use bevy::prelude::*;
+use game::GamePlugin;
 use menu::MenuPlugin;
 use particles::ParticlePlugin;
 use transitions::TransitionPlugin;
@@ -18,6 +20,9 @@ pub enum GameState {
     Matchmaking,
     InGame,
 }
+
+#[derive(Resource, Default)]
+pub struct SelectedMode(pub String);
 
 /// 菜单子状态（主菜单内的页面）
 #[derive(SubStates, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
@@ -47,7 +52,8 @@ fn main() {
         .insert_resource(ClearColor(theme::GOTHIC_INK))
         .init_state::<GameState>()
         .add_sub_state::<MenuPage>()
-        .add_plugins((MenuPlugin, ParticlePlugin, TransitionPlugin))
+        .init_resource::<SelectedMode>()
+        .add_plugins((MenuPlugin, ParticlePlugin, TransitionPlugin, GamePlugin))
         .add_systems(Startup, setup_camera)
         .run();
 }

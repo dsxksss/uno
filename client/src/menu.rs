@@ -8,8 +8,7 @@
 
 use crate::theme;
 use crate::transitions::{trigger_transition, TransitionState};
-use crate::GameState;
-use crate::MenuPage;
+use crate::{GameState, MenuPage, SelectedMode};
 use bevy::prelude::*;
 
 pub struct MenuPlugin;
@@ -674,6 +673,8 @@ fn button_system(
     child_query: Query<&Children>,
     mut transition: ResMut<TransitionState>,
     mut app_exit_events: EventWriter<AppExit>,
+    mut next_game_state: ResMut<NextState<GameState>>,
+    mut selected_mode: ResMut<SelectedMode>,
 ) {
     for (interaction, mut bg, mut border, mut shadow, mut scalar, action, children) in
         &mut interaction_query
@@ -686,6 +687,10 @@ fn button_system(
                 match action {
                     MenuButtonAction::Play => {
                         trigger_transition(&mut transition, MenuPage::ModeSelect)
+                    }
+                    MenuButtonAction::Mode(mode) => {
+                        selected_mode.0 = mode.clone();
+                        next_game_state.set(GameState::InGame);
                     }
                     MenuButtonAction::Back => trigger_transition(&mut transition, MenuPage::Title),
                     MenuButtonAction::Quit => {
