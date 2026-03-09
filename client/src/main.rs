@@ -44,7 +44,7 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(ClearColor(theme::BG_DARK))
+        .insert_resource(ClearColor(theme::GOTHIC_INK))
         .init_state::<GameState>()
         .add_sub_state::<MenuPage>()
         .add_plugins((MenuPlugin, ParticlePlugin, TransitionPlugin))

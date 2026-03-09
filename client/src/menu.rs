@@ -14,9 +14,31 @@ use bevy::prelude::*;
 
 pub struct MenuPlugin;
 
+#[derive(Resource)]
+struct IconAssets {
+    layout: Handle<TextureAtlasLayout>,
+    texture: Handle<Image>,
+}
+
+impl FromWorld for IconAssets {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        let texture = asset_server.load("images/部门.png");
+        let layout = TextureAtlasLayout::from_grid(UVec2::splat(200), 5, 5, None, None);
+        let mut texture_atlas_layouts = world.resource_mut::<Assets<TextureAtlasLayout>>();
+        let layout_handle = texture_atlas_layouts.add(layout);
+
+        Self {
+            layout: layout_handle,
+            texture,
+        }
+    }
+}
+
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(MenuPage::Title), spawn_title_menu)
+        app.init_resource::<IconAssets>()
+            .add_systems(OnEnter(MenuPage::Title), spawn_title_menu)
             .add_systems(OnEnter(MenuPage::ModeSelect), spawn_mode_select_menu)
             .add_systems(
                 Update,
@@ -57,8 +79,51 @@ struct TypewriterText {
 
 // ─── UI 生成 ────────────────────────────────────────────────
 
-fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn spawn_title_menu(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    icons: Res<IconAssets>,
+) {
     let font = asset_server.load("fonts/simhei.ttf");
+
+    // --- 动态背景排线 (Procedural Hatching) ---
+    commands
+        .spawn(Node {
+            width: Val::Vw(100.0),
+            height: Val::Vh(100.0),
+            position_type: PositionType::Absolute,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|bg| {
+            for i in 0..20 {
+                bg.spawn((
+                    Node {
+                        width: Val::Vw(150.0),
+                        height: Val::Px(1.0),
+                        position_type: PositionType::Absolute,
+                        top: Val::Vh(i as f32 * 5.0),
+                        left: Val::Vw(-25.0),
+                        ..default()
+                    },
+                    BackgroundColor(theme::GOTHIC_INK.with_alpha(0.05)),
+                    Transform::from_rotation(Quat::from_rotation_z(0.3)),
+                ));
+            }
+        });
+
+    // --- 顶部黑色墨迹条 (Inky Header) ---
+    commands.spawn((
+        Node {
+            width: Val::Vw(100.0),
+            height: Val::Px(80.0),
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            ..default()
+        },
+        BackgroundColor(theme::GOTHIC_INK),
+        ZIndex(0),
+    ));
 
     commands
         .spawn((
@@ -82,7 +147,7 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                     font_size: theme::TITLE_FONT_SIZE,
                     ..default()
                 },
-                TextColor(theme::CARD_WHITE),
+                TextColor(theme::GOTHIC_PAPER),
                 TypewriterText {
                     full_text: "KPI 突 围".to_string(),
                     timer: Timer::from_seconds(0.1, TimerMode::Repeating),
@@ -108,10 +173,31 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                 },
             ));
 
-            // --- 按钮列表 ---
-            spawn_button(parent, "开始考核", MenuButtonAction::Play, font.clone());
-            spawn_button(parent, "人事管理", MenuButtonAction::Settings, font.clone());
-            spawn_button(parent, "离职申请", MenuButtonAction::Quit, font.clone());
+            // --- 按钮列表 (图标索引: 4=KPI, 2=Admin/Settings, 0=Dev/Quit) ---
+            spawn_button(
+                parent,
+                "开始考核",
+                MenuButtonAction::Play,
+                font.clone(),
+                Some(4),
+                &icons,
+            );
+            spawn_button(
+                parent,
+                "人事管理",
+                MenuButtonAction::Settings,
+                font.clone(),
+                Some(2),
+                &icons,
+            );
+            spawn_button(
+                parent,
+                "离职申请",
+                MenuButtonAction::Quit,
+                font.clone(),
+                Some(0),
+                &icons,
+            );
 
             // --- 右侧 HUD 面板 ---
             parent
@@ -137,8 +223,8 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 flex_direction: FlexDirection::Column,
                                 ..default()
                             },
-                            BorderColor(theme::PRIMARY),
-                            BackgroundColor(theme::SURFACE),
+                            BorderColor(theme::GOTHIC_RED),
+                            BackgroundColor(theme::GOTHIC_INK),
                         ))
                         .with_children(|profile: &mut ChildBuilder| {
                             profile.spawn((
@@ -148,7 +234,7 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(theme::TEXT_BODY),
+                                TextColor(theme::GOTHIC_PAPER.with_alpha(0.6)),
                             ));
                             profile.spawn((
                                 Text::new("职场等级: 骨干 P5"),
@@ -157,7 +243,7 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                                     font_size: 18.0,
                                     ..default()
                                 },
-                                TextColor(theme::TEXT_TITLE),
+                                TextColor(theme::GOTHIC_PAPER),
                             ));
                         });
 
@@ -171,8 +257,8 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 flex_direction: FlexDirection::Column,
                                 ..default()
                             },
-                            BorderColor(theme::BORDER),
-                            BackgroundColor(theme::SURFACE),
+                            BorderColor(theme::GOTHIC_RED.with_alpha(0.3)),
+                            BackgroundColor(theme::GOTHIC_INK),
                         ))
                         .with_children(|news: &mut ChildBuilder| {
                             news.spawn((
@@ -182,7 +268,7 @@ fn spawn_title_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                                     font_size: 16.0,
                                     ..default()
                                 },
-                                TextColor(theme::PRIMARY),
+                                TextColor(theme::GOTHIC_RED),
                                 Node {
                                     margin: UiRect::bottom(Val::Px(10.0)),
                                     ..default()
@@ -241,10 +327,14 @@ fn spawn_corner_deco(parent: &mut ChildBuilder, v_val: Val, h_val: Val, pos: Pos
         }
     }
 
-    parent.spawn((node, BorderColor(theme::PRIMARY.with_alpha(0.4))));
+    parent.spawn((node, BorderColor(theme::GOTHIC_RED.with_alpha(0.4))));
 }
 
-fn spawn_mode_select_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn spawn_mode_select_menu(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    icons: Res<IconAssets>,
+) {
     let font = asset_server.load("fonts/simhei.ttf");
 
     commands
@@ -285,21 +375,10 @@ fn spawn_mode_select_menu(mut commands: Commands, asset_server: Res<AssetServer>
                     ..default()
                 })
                 .with_children(|card_row| {
-                    let cards = vec![
-                        ("开发部", "dev_refactor.png"),
-                        ("业务部", "business_visit.png"),
-                        ("行政部", "admin_meeting.png"),
-                        ("管理部", "mgmt_strategy.png"),
-                    ];
+                    let cards = vec![("研发部", 0), ("业务部", 1), ("行政部", 2), ("管理部", 3)];
 
-                    for (name, img) in cards {
-                        spawn_card(
-                            card_row,
-                            name,
-                            img,
-                            asset_server.load(format!("images/cards/{}", img)),
-                            font.clone(),
-                        );
+                    for (name, index) in cards {
+                        spawn_card(card_row, name, index, &icons, font.clone());
                     }
                 });
 
@@ -310,7 +389,14 @@ fn spawn_mode_select_menu(mut commands: Commands, asset_server: Res<AssetServer>
                     ..default()
                 })
                 .with_children(|p| {
-                    spawn_button(p, "返回主界面", MenuButtonAction::Back, font.clone());
+                    spawn_button(
+                        p,
+                        "返回主界面",
+                        MenuButtonAction::Back,
+                        font.clone(),
+                        None,
+                        &icons,
+                    );
                 });
         });
 }
@@ -318,8 +404,8 @@ fn spawn_mode_select_menu(mut commands: Commands, asset_server: Res<AssetServer>
 fn spawn_card(
     parent: &mut ChildBuilder,
     name: &str,
-    _img_path: &str,
-    texture: Handle<Image>,
+    icon_idx: usize,
+    icons: &Res<IconAssets>,
     font: Handle<Font>,
 ) {
     parent
@@ -331,9 +417,11 @@ fn spawn_card(
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 padding: UiRect::top(Val::Px(15.0)),
+                border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            BackgroundColor(theme::CARD_WHITE),
+            BorderColor(theme::GOTHIC_INK),
+            BackgroundColor(theme::GOTHIC_GREY),
             BoxShadow {
                 color: theme::SHADOW,
                 x_offset: Val::Px(0.0),
@@ -348,29 +436,73 @@ fn spawn_card(
             MenuButtonAction::Mode(name.to_string()),
         ))
         .with_children(|card| {
-            // 部门名称 (动态文字)
+            // 核心插画 (容器设为菱形)
+            // -- 在插画背后添加一些“阴影/排线”细节 --
+            card.spawn(Node {
+                width: Val::Px(165.0),
+                height: Val::Px(165.0),
+                position_type: PositionType::Absolute,
+                top: Val::Px(45.0),
+                ..default()
+            })
+            .with_children(|hatch| {
+                for i in 0..5 {
+                    hatch.spawn((
+                        Node {
+                            width: Val::Px(165.0),
+                            height: Val::Px(1.0),
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(i as f32 * 30.0),
+                            ..default()
+                        },
+                        BackgroundColor(theme::GOTHIC_INK.with_alpha(0.3)),
+                        Transform::from_rotation(Quat::from_rotation_z(0.785)),
+                    ));
+                }
+            });
+
+            card.spawn((
+                Node {
+                    width: Val::Px(160.0),
+                    height: Val::Px(160.0),
+                    margin: UiRect::top(Val::Px(10.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(theme::GOTHIC_INK),
+                Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            ))
+            .with_children(|icon_bg| {
+                // 内部显示的图标 (使用 Atlas)
+                icon_bg.spawn((
+                    ImageNode {
+                        image: icons.texture.clone(),
+                        texture_atlas: Some(TextureAtlas {
+                            layout: icons.layout.clone(),
+                            index: icon_idx,
+                        }),
+                        ..default()
+                    },
+                    // 图标本身旋回 45 度，保持竖直
+                    Transform::from_rotation(Quat::from_rotation_z(-std::f32::consts::FRAC_PI_4)),
+                ));
+            });
+
+            // 部门名称 (移至图标下方)
             card.spawn((
                 Text::new(name),
                 TextFont {
                     font: font.clone(),
-                    font_size: 24.0,
+                    font_size: 26.0,
                     ..default()
                 },
-                TextColor(Color::BLACK),
+                TextColor(theme::GOTHIC_RED),
+                ButtonText,
                 Node {
-                    margin: UiRect::bottom(Val::Px(10.0)),
+                    margin: UiRect::top(Val::Px(30.0)),
                     ..default()
                 },
-            ));
-
-            // 核心插画 (无文字素材)
-            card.spawn((
-                Node {
-                    width: Val::Px(180.0),
-                    height: Val::Px(180.0),
-                    ..default()
-                },
-                ImageNode::new(texture),
             ));
 
             // 技术细节文字 (修饰语)
@@ -395,6 +527,8 @@ fn spawn_button(
     text: &str,
     action: MenuButtonAction,
     font: Handle<Font>,
+    icon_idx: Option<usize>,
+    icons: &Res<IconAssets>,
 ) {
     // 外层容器，负责整体倾斜和定位
     parent
@@ -410,9 +544,9 @@ fn spawn_button(
                 padding: UiRect::left(Val::Px(20.0)),
                 ..default()
             },
-            Transform::from_rotation(Quat::from_rotation_z(theme::SKEW_ANGLE)),
-            BorderColor(theme::BORDER.with_alpha(0.1)),
-            BackgroundColor(theme::SURFACE.with_alpha(0.6)),
+            Transform::from_rotation(Quat::IDENTITY),
+            BorderColor(theme::GOTHIC_INK),
+            BackgroundColor(theme::GOTHIC_GREY),
             BoxShadow {
                 color: theme::SHADOW,
                 x_offset: Val::Px(10.0),
@@ -435,7 +569,8 @@ fn spawn_button(
                     font_size: 9.0,
                     ..default()
                 },
-                TextColor(theme::TEXT_META),
+                TextColor(theme::GOTHIC_PAPER.with_alpha(0.4)),
+                ButtonText, // Also fade/highlight this meta text?
                 Node {
                     position_type: PositionType::Absolute,
                     top: Val::Px(-12.0),
@@ -444,27 +579,58 @@ fn spawn_button(
                 },
             ));
 
-            // 侧边指示条 (Hover 时会变色闪烁)
-            parent.spawn((
-                Node {
-                    width: Val::Px(3.0),
-                    height: Val::Px(24.0),
-                    margin: UiRect::right(Val::Px(15.0)),
+            // 按钮内部布局：图标 + 文字
+            parent
+                .spawn(Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
                     ..default()
-                },
-                BackgroundColor(theme::PRIMARY.with_alpha(0.2)),
-            ));
+                })
+                .with_children(|inner| {
+                    // 如果有图标，从 Atlas 中加载
+                    if let Some(idx) = icon_idx {
+                        inner.spawn((
+                            Node {
+                                width: Val::Px(24.0),
+                                height: Val::Px(24.0),
+                                margin: UiRect::right(Val::Px(12.0)),
+                                ..default()
+                            },
+                            ImageNode {
+                                image: icons.texture.clone(),
+                                texture_atlas: Some(TextureAtlas {
+                                    layout: icons.layout.clone(),
+                                    index: idx,
+                                }),
+                                ..default()
+                            },
+                        ));
+                    }
 
-            // 核心文字
-            parent.spawn((
-                Text::new(text),
-                TextFont {
-                    font: font.clone(),
-                    font_size: theme::BUTTON_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(theme::TEXT_BODY),
-            ));
+                    // 侧边指示条 (Gothic Style)
+                    inner.spawn((
+                        Node {
+                            width: Val::Px(3.0),
+                            height: Val::Px(24.0),
+                            margin: UiRect::right(Val::Px(15.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::GOTHIC_RED.with_alpha(0.2)),
+                    ));
+
+                    // 核心文字
+                    inner.spawn((
+                        Text::new(text),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: theme::BUTTON_FONT_SIZE,
+                            ..default()
+                        },
+                        TextColor(theme::GOTHIC_PAPER),
+                        ButtonText,
+                    ));
+                });
 
             // 按钮末尾的辅助技术码
             parent.spawn((
@@ -474,7 +640,8 @@ fn spawn_button(
                     font_size: 10.0,
                     ..default()
                 },
-                TextColor(theme::TEXT_META),
+                TextColor(theme::GOTHIC_PAPER.with_alpha(0.4)),
+                ButtonText,
                 Node {
                     position_type: PositionType::Absolute,
                     right: Val::Px(15.0),
@@ -484,6 +651,9 @@ fn spawn_button(
             ));
         });
 }
+
+#[derive(Component)]
+struct ButtonText;
 
 // ─── 系统逻辑 ──────────────────────────────────────────────
 
@@ -500,10 +670,8 @@ fn button_system(
         ),
         (Changed<Interaction>, With<Button>),
     >,
-    // 合并文本查询以避免并行写入冲突
-    mut text_query: Query<&mut TextColor>,
-    // 合并背景查询（注意：interaction_query 已经有了 Button 的 BackgroundColor，所以这里的查询要排除 Button）
-    mut children_bg_query: Query<&mut BackgroundColor, Without<Button>>,
+    mut text_query: Query<&mut TextColor, With<ButtonText>>,
+    child_query: Query<&Children>,
     mut transition: ResMut<TransitionState>,
     mut app_exit_events: EventWriter<AppExit>,
 ) {
@@ -512,15 +680,14 @@ fn button_system(
     {
         match *interaction {
             Interaction::Pressed => {
-                bg.0 = theme::PRIMARY;
-                shadow.color = theme::PRIMARY.with_alpha(0.4);
+                bg.0 = theme::GOTHIC_PAPER;
+                shadow.color = theme::GOTHIC_PAPER.with_alpha(0.4);
+                // ... logic for actions ...
                 match action {
                     MenuButtonAction::Play => {
-                        trigger_transition(&mut transition, MenuPage::ModeSelect);
+                        trigger_transition(&mut transition, MenuPage::ModeSelect)
                     }
-                    MenuButtonAction::Back => {
-                        trigger_transition(&mut transition, MenuPage::Title);
-                    }
+                    MenuButtonAction::Back => trigger_transition(&mut transition, MenuPage::Title),
                     MenuButtonAction::Quit => {
                         app_exit_events.send(AppExit::Success);
                     }
@@ -528,59 +695,58 @@ fn button_system(
                 }
             }
             Interaction::Hovered => {
-                let is_quit = matches!(action, MenuButtonAction::Quit);
-                let highlight_color = if is_quit {
-                    theme::DANGER
-                } else {
-                    theme::PRIMARY
-                };
-
-                bg.0 = theme::SURFACE.with_alpha(0.98);
-                border.0 = highlight_color.with_alpha(0.5);
-                shadow.color = highlight_color.with_alpha(0.4);
+                bg.0 = theme::GOTHIC_RED.with_alpha(0.85);
+                border.0 = theme::GOTHIC_INK;
+                shadow.color = theme::GOTHIC_RED.with_alpha(0.4);
                 shadow.blur_radius = Val::Px(35.0);
                 scalar.target = 1.05;
 
-                // 动态更新子项：按顺序获取以避免借用冲突
-                if let Some(&id) = children.get(2) {
-                    if let Ok(mut txt) = text_query.get_mut(id) {
-                        txt.0 = highlight_color;
-                    }
-                }
-                if let Some(&id) = children.get(0) {
-                    if let Ok(mut meta) = text_query.get_mut(id) {
-                        meta.0 = highlight_color.with_alpha(0.6);
-                    }
-                }
-                if let Some(&id) = children.get(1) {
-                    if let Ok(mut side) = children_bg_query.get_mut(id) {
-                        side.0 = highlight_color;
-                    }
-                }
+                highlight_button_text(
+                    &mut text_query,
+                    children,
+                    theme::GOTHIC_PAPER,
+                    true,
+                    &child_query,
+                );
             }
             Interaction::None => {
-                bg.0 = theme::SURFACE.with_alpha(0.6);
-                border.0 = theme::BORDER.with_alpha(0.1);
+                bg.0 = theme::GOTHIC_GREY;
+                border.0 = theme::GOTHIC_INK;
                 shadow.color = theme::SHADOW;
                 shadow.blur_radius = Val::Px(15.0);
                 scalar.target = 1.0;
 
-                if let Some(&id) = children.get(2) {
-                    if let Ok(mut txt) = text_query.get_mut(id) {
-                        txt.0 = theme::TEXT_BODY;
-                    }
-                }
-                if let Some(&id) = children.get(0) {
-                    if let Ok(mut meta) = text_query.get_mut(id) {
-                        meta.0 = theme::TEXT_META;
-                    }
-                }
-                if let Some(&id) = children.get(1) {
-                    if let Ok(mut side) = children_bg_query.get_mut(id) {
-                        side.0 = theme::PRIMARY.with_alpha(0.1);
-                    }
-                }
+                highlight_button_text(
+                    &mut text_query,
+                    children,
+                    theme::GOTHIC_PAPER,
+                    false,
+                    &child_query,
+                );
             }
+        }
+    }
+}
+
+/// 递归高亮按钮文字
+fn highlight_button_text(
+    query: &mut Query<&mut TextColor, With<ButtonText>>,
+    children: &Children,
+    color: Color,
+    hover: bool,
+    child_query: &Query<&Children>,
+) {
+    for &child in children.iter() {
+        if let Ok(mut txt) = query.get_mut(child) {
+            txt.0 = if hover {
+                theme::GOTHIC_RED
+            } else {
+                theme::GOTHIC_PAPER
+            };
+        }
+        // 递归
+        if let Ok(inner_children) = child_query.get(child) {
+            highlight_button_text(query, inner_children, color, hover, child_query);
         }
     }
 }
